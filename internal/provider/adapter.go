@@ -3,8 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-
-	"github.com/DelgadoElias/billax/internal/errors"
 )
 
 // ProviderAdapter is the single point of contact between domain logic and external payment providers

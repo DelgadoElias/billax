@@ -100,7 +100,7 @@ func (h *Handler) ListBySubscription(w http.ResponseWriter, r *http.Request) {
 
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if _, err := json.Unmarshal([]byte(l), &limit); err != nil {
+		if err := json.Unmarshal([]byte(l), &limit); err != nil {
 			limit = 20
 		}
 	}

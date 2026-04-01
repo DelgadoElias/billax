@@ -319,16 +319,10 @@ func (r *postgresRepository) Cancel(ctx context.Context, id uuid.UUID, atPeriodE
 	var sub Subscription
 	var metadataJSON json.RawMessage
 
-	var newStatus Status
 	var canceledAt *time.Time
 	if !atPeriodEnd {
-		newStatus = StatusCanceled
 		now := time.Now()
 		canceledAt = &now
-	} else {
-		// If canceling at period end, keep the current status but set cancel_at_period_end=true
-		// We'll query first to get the current status, or just set it to the current value
-		// For simplicity, we'll update all required fields
 	}
 
 	updateClause := `cancel_at_period_end = true, updated_at = now()`
