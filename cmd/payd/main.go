@@ -13,10 +13,8 @@ import (
 
 	"github.com/DelgadoElias/billax/internal/config"
 	"github.com/DelgadoElias/billax/internal/db"
-	"github.com/go-chi/chi/v5"
+	"github.com/DelgadoElias/billax/internal/middleware"
 )
-
-const version = "0.1.0"
 
 func main() {
 	// Load configuration
@@ -41,14 +39,8 @@ func main() {
 
 	logger.Info("database connected successfully")
 
-	// Create router
-	router := chi.NewRouter()
-
-	// Health check endpoint (no auth required)
-	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, version)
-	})
+	// Create router with middlewares
+	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault)
 
 	// Start HTTP server
 	addr := net.JoinHostPort("", fmt.Sprintf("%d", cfg.Port))
