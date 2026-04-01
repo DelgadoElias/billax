@@ -1,0 +1,13 @@
+.env
+bin/
+*.exe
+*.o
+*.a
+.DS_Store
+vendor/
+dist/
+.idea/
+*.swp
+*.swo
+PROMPT_SEMANA*.md
+CLAUDE.md
