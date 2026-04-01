@@ -20,6 +20,7 @@ type Config struct {
 	RateLimitDefault         int
 	WebhookDeliveryTimeout   time.Duration
 	WebhookMaxRetries        int
+	ProvidersConfigPath      string // path to providers.yml
 }
 
 // Load reads configuration from environment variables with validation
@@ -37,6 +38,7 @@ func Load() (*Config, error) {
 		RateLimitDefault: getEnvInt("RATE_LIMIT_DEFAULT", 100),
 		WebhookDeliveryTimeout: getEnvDuration("WEBHOOK_DELIVERY_TIMEOUT", 10*time.Second),
 		WebhookMaxRetries: getEnvInt("WEBHOOK_MAX_RETRIES", 5),
+		ProvidersConfigPath: getEnv("PROVIDERS_CONFIG_PATH", "providers.yml"),
 	}
 
 	// Validate required fields

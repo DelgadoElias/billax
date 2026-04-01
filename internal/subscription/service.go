@@ -31,7 +31,7 @@ func NewService(repo SubscriptionRepo, planRepo plan.PlanRepo, paymentRepo payme
 	}
 }
 
-// Create creates a new subscription
+// Create creates a new subscription (plan-based or planless)
 func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscriptionInput) (Subscription, error) {
 	// Extract tenant ID from context
 	tenantID := middleware.TenantIDFromContext(ctx)
@@ -39,39 +39,84 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 		return Subscription{}, errors.ErrMissingTenantID
 	}
 
-	// Resolve plan
-	planObj, err := s.planRepo.GetBySlug(ctx, tenantID, input.PlanSlug)
-	if err != nil {
-		return Subscription{}, fmt.Errorf("resolving plan: %w", err)
-	}
-
-	if !planObj.IsActive {
-		return Subscription{}, errors.ErrPlanNotActive
-	}
-
-	// Calculate period
 	periodStart := time.Now()
-	periodEnd := s.calculatePeriodEnd(periodStart, planObj.Interval, planObj.IntervalCount)
-
-	// Determine initial status and trial end
+	subscriptionKey := uuid.New()
+	tags := s.normalizeTags(input.Tags)
 	status := StatusActive
 	var trialEndsAt *time.Time
-	if planObj.TrialDays > 0 {
-		status = StatusTrialing
-		trialEnd := periodStart.AddDate(0, 0, planObj.TrialDays)
-		trialEndsAt = &trialEnd
+	var amount int64
+	var currency string
+	var interval plan.Interval
+	var intervalCount int
+	var planID *uuid.UUID
+
+	// Plan-based path
+	if input.PlanSlug != "" {
+		planObj, err := s.planRepo.GetBySlug(ctx, tenantID, input.PlanSlug)
+		if err != nil {
+			return Subscription{}, fmt.Errorf("resolving plan: %w", err)
+		}
+
+		if !planObj.IsActive {
+			return Subscription{}, errors.ErrPlanNotActive
+		}
+
+		// Check provider capability for plan-based billing if provider is specified
+		if input.ProviderName != "" {
+			caps := s.adapter.GetCapabilities(input.ProviderName)
+			if !caps.Plans {
+				return Subscription{}, errors.ErrPlansNotSupported
+			}
+		}
+
+		// Copy from plan
+		planID = &planObj.ID
+		amount = planObj.Amount
+		currency = planObj.Currency
+		interval = planObj.Interval
+		intervalCount = planObj.IntervalCount
+
+		// Determine trial
+		if planObj.TrialDays > 0 {
+			status = StatusTrialing
+			trialEnd := periodStart.AddDate(0, 0, planObj.TrialDays)
+			trialEndsAt = &trialEnd
+		}
+	} else {
+		// Planless path
+		if input.Amount <= 0 {
+			return Subscription{}, errors.ErrInvalidInput
+		}
+		if input.Currency == "" {
+			return Subscription{}, errors.ErrInvalidInput
+		}
+		// interval validation: "day", "week", "month", "year"
+		if input.Interval != plan.IntervalDay && input.Interval != plan.IntervalWeek &&
+			input.Interval != plan.IntervalMonth && input.Interval != plan.IntervalYear {
+			return Subscription{}, errors.ErrInvalidInput
+		}
+		if input.IntervalCount <= 0 {
+			return Subscription{}, errors.ErrInvalidInput
+		}
+
+		amount = input.Amount
+		currency = input.Currency
+		interval = input.Interval
+		intervalCount = input.IntervalCount
+		// planless subs have no trial
 	}
 
-	// Generate subscription key (UUIDv7)
-	subscriptionKey := uuid.New()
-
-	// Normalize tags
-	tags := s.normalizeTags(input.Tags)
+	// Calculate period end
+	periodEnd := s.calculatePeriodEnd(periodStart, interval, intervalCount)
 
 	// Create subscription
 	sub := Subscription{
 		TenantID:               tenantID,
-		PlanID:                 planObj.ID,
+		PlanID:                 planID,
+		Amount:                 amount,
+		Currency:               currency,
+		Interval:               interval,
+		IntervalCount:          intervalCount,
 		SubscriptionKey:        subscriptionKey,
 		ExternalCustomerID:     input.ExternalCustomerID,
 		Status:                 status,
@@ -118,6 +163,23 @@ func (s *SubscriptionService) GetByID(ctx context.Context, id uuid.UUID) (Subscr
 
 // Update applies partial updates to a subscription
 func (s *SubscriptionService) Update(ctx context.Context, id uuid.UUID, input UpdateSubscriptionInput) (Subscription, error) {
+	// Fetch current subscription to check capabilities for amount update
+	currentSub, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return Subscription{}, err
+	}
+
+	// Pay-per-use gate: check if amount is being updated
+	if input.Amount != nil {
+		if currentSub.ProviderName == "" {
+			return Subscription{}, errors.ErrProviderRequired
+		}
+		caps := s.adapter.GetCapabilities(currentSub.ProviderName)
+		if !caps.PayPerUse {
+			return Subscription{}, errors.ErrPayPerUseNotSupported
+		}
+	}
+
 	// Normalize tags if provided
 	if input.TagsProvided && input.Tags != nil {
 		input.Tags = s.normalizeTags(input.Tags)

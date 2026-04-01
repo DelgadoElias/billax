@@ -1,0 +1,16 @@
+# providers.yml — deployment-level capability gates for payment connectors.
+# Keys match GetProviderName() on each connector.
+# If a provider is absent, defaults apply: plans=true, pay_per_use=false.
+# This file restricts/overrides what connectors self-declare via Capabilities().
+
+mercadopago:
+  plans: true
+  pay_per_use: false
+
+helipagos:
+  plans: true
+  pay_per_use: true
+
+stripe:
+  plans: true
+  pay_per_use: true

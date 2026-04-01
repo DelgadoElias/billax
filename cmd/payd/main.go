@@ -45,10 +45,17 @@ func main() {
 
 	logger.Info("database connected successfully")
 
+	// Load provider capabilities from YAML
+	yamlCaps, err := provider.LoadCapabilitiesFile(cfg.ProvidersConfigPath)
+	if err != nil {
+		logger.Error("failed to load provider capabilities", "error", err)
+		os.Exit(1)
+	}
+
 	// Initialize provider layer (empty for Week 2, will add Mercado Pago in Week 3)
 	registry := provider.NewRegistry()
 	// registry.Register(mercadopago.New())  ← Week 3
-	adapter := provider.NewAdapter(registry)
+	adapter := provider.NewAdapter(registry, yamlCaps)
 
 	// Initialize repositories
 	planRepo := plan.NewRepository(pool)

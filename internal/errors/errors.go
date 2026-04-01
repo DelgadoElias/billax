@@ -18,6 +18,9 @@ var (
 	ErrMissingTenantID       = errors.New("tenant ID missing from context")
 	ErrProviderNotFound      = errors.New("provider not registered")
 	ErrProviderError         = errors.New("provider error")
+	ErrPayPerUseNotSupported = errors.New("provider does not support pay-per-use billing")
+	ErrPlansNotSupported     = errors.New("provider does not support plan-based billing")
+	ErrProviderRequired      = errors.New("a provider must be set to update amount")
 )
 
 // DomainError carries HTTP-level context for the handler layer
@@ -41,6 +44,8 @@ func HTTPStatusFor(err error) int {
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrMissingIdempotencyKey):
 		return http.StatusBadRequest
 	case errors.Is(err, ErrPlanNotActive), errors.Is(err, ErrSubscriptionExpired):
+		return http.StatusUnprocessableEntity
+	case errors.Is(err, ErrPayPerUseNotSupported), errors.Is(err, ErrPlansNotSupported), errors.Is(err, ErrProviderRequired):
 		return http.StatusUnprocessableEntity
 	case errors.Is(err, ErrProviderNotFound):
 		return http.StatusBadRequest
@@ -70,6 +75,12 @@ func CodeFor(err error) string {
 		return "invalid_input"
 	case errors.Is(err, ErrConflict):
 		return "conflict"
+	case errors.Is(err, ErrPayPerUseNotSupported):
+		return "pay_per_use_not_supported"
+	case errors.Is(err, ErrPlansNotSupported):
+		return "plans_not_supported"
+	case errors.Is(err, ErrProviderRequired):
+		return "provider_required"
 	case errors.Is(err, ErrProviderNotFound):
 		return "provider_not_found"
 	case errors.Is(err, ErrProviderError):

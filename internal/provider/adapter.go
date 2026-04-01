@@ -9,11 +9,12 @@ import (
 // It resolves the correct connector from the registry and normalizes responses into domain types
 type ProviderAdapter struct {
 	registry *Registry
+	yamlCaps CapabilitiesConfig
 }
 
-// NewAdapter creates a new provider adapter with the given registry
-func NewAdapter(registry *Registry) *ProviderAdapter {
-	return &ProviderAdapter{registry: registry}
+// NewAdapter creates a new provider adapter with the given registry and capability config
+func NewAdapter(registry *Registry, yamlCaps CapabilitiesConfig) *ProviderAdapter {
+	return &ProviderAdapter{registry: registry, yamlCaps: yamlCaps}
 }
 
 // CreateCharge looks up the named provider, calls CreateCharge, returns normalized ChargeResult
@@ -78,4 +79,25 @@ func (a *ProviderAdapter) ValidateConfig(ctx context.Context, providerName strin
 	}
 
 	return nil
+}
+
+// GetCapabilities returns the effective capabilities for a provider name.
+// Resolution order:
+// 1. Look up the connector in the registry.
+// 2. Start with the connector's self-declared Capabilities().
+// 3. If a YAML entry exists for this provider name, its booleans override the connector's.
+// If the provider is not registered, returns defaultCapabilities (safe fallback).
+func (a *ProviderAdapter) GetCapabilities(providerName string) ProviderCapabilities {
+	p, err := a.registry.Lookup(providerName)
+	if err != nil {
+		return defaultCapabilities
+	}
+	caps := p.Capabilities() // connector self-declares
+
+	// YAML gates override
+	if entry, ok := a.yamlCaps[providerName]; ok {
+		caps = entry
+	}
+
+	return caps
 }

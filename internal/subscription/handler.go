@@ -148,6 +148,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(rawValue, &b); err == nil {
 				input.CancelAtPeriodEnd = &b
 			}
+		case "amount":
+			var amt int64
+			if err := json.Unmarshal(rawValue, &amt); err == nil {
+				input.Amount = &amt
+			}
 		case "tags":
 			var tags []string
 			if err := json.Unmarshal(rawValue, &tags); err == nil {

@@ -39,7 +39,8 @@ func scanSubscription(row pgx.Row) (Subscription, error) {
 	var metadataJSON json.RawMessage
 
 	err := row.Scan(
-		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.SubscriptionKey, &sub.ExternalCustomerID,
+		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		&sub.SubscriptionKey, &sub.ExternalCustomerID,
 		&sub.Status, &sub.ProviderName, &sub.ProviderSubscriptionID,
 		&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CanceledAt,
 		&sub.CancelAtPeriodEnd, &sub.Tags, &metadataJSON, &sub.CreatedAt, &sub.UpdatedAt,
@@ -64,13 +65,14 @@ func (r *postgresRepository) Create(ctx context.Context, sub Subscription) (Subs
 	var metadataResult json.RawMessage
 
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO subscriptions (tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
-		 RETURNING id, tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
-		sub.TenantID, sub.PlanID, sub.SubscriptionKey, sub.ExternalCustomerID, sub.Status, sub.ProviderName, sub.ProviderSubscriptionID,
+		`INSERT INTO subscriptions (tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), now())
+		 RETURNING id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
+		sub.TenantID, sub.PlanID, sub.Amount, sub.Currency, sub.Interval, sub.IntervalCount, sub.SubscriptionKey, sub.ExternalCustomerID, sub.Status, sub.ProviderName, sub.ProviderSubscriptionID,
 		sub.CurrentPeriodStart, sub.CurrentPeriodEnd, sub.TrialEndsAt, sub.CanceledAt, sub.CancelAtPeriodEnd, sub.Tags, metadataJSON,
 	).Scan(
-		&createdSub.ID, &createdSub.TenantID, &createdSub.PlanID, &createdSub.SubscriptionKey, &createdSub.ExternalCustomerID,
+		&createdSub.ID, &createdSub.TenantID, &createdSub.PlanID, &createdSub.Amount, &createdSub.Currency, &createdSub.Interval, &createdSub.IntervalCount,
+		&createdSub.SubscriptionKey, &createdSub.ExternalCustomerID,
 		&createdSub.Status, &createdSub.ProviderName, &createdSub.ProviderSubscriptionID,
 		&createdSub.CurrentPeriodStart, &createdSub.CurrentPeriodEnd, &createdSub.TrialEndsAt, &createdSub.CanceledAt,
 		&createdSub.CancelAtPeriodEnd, &createdSub.Tags, &metadataResult, &createdSub.CreatedAt, &createdSub.UpdatedAt,
@@ -93,11 +95,12 @@ func (r *postgresRepository) GetByKey(ctx context.Context, key uuid.UUID) (Subsc
 	var metadataJSON json.RawMessage
 
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
+		`SELECT id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
 		 FROM subscriptions WHERE subscription_key = $1`,
 		key,
 	).Scan(
-		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.SubscriptionKey, &sub.ExternalCustomerID,
+		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		&sub.SubscriptionKey, &sub.ExternalCustomerID,
 		&sub.Status, &sub.ProviderName, &sub.ProviderSubscriptionID,
 		&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CanceledAt,
 		&sub.CancelAtPeriodEnd, &sub.Tags, &metadataJSON, &sub.CreatedAt, &sub.UpdatedAt,
@@ -123,11 +126,12 @@ func (r *postgresRepository) GetByID(ctx context.Context, id uuid.UUID) (Subscri
 	var metadataJSON json.RawMessage
 
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
+		`SELECT id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
 		 FROM subscriptions WHERE id = $1`,
 		id,
 	).Scan(
-		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.SubscriptionKey, &sub.ExternalCustomerID,
+		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		&sub.SubscriptionKey, &sub.ExternalCustomerID,
 		&sub.Status, &sub.ProviderName, &sub.ProviderSubscriptionID,
 		&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CanceledAt,
 		&sub.CancelAtPeriodEnd, &sub.Tags, &metadataJSON, &sub.CreatedAt, &sub.UpdatedAt,
@@ -176,6 +180,12 @@ func (r *postgresRepository) Update(ctx context.Context, id uuid.UUID, input Upd
 	}
 
 	// Handle metadata: null value = clear, non-null = set
+	if input.Amount != nil {
+		updates = append(updates, fmt.Sprintf("amount = $%d", argNum))
+		args = append(args, *input.Amount)
+		argNum++
+	}
+
 	if input.Metadata != nil {
 		if len(input.Metadata) == 0 || string(input.Metadata) == "null" {
 			updates = append(updates, fmt.Sprintf("metadata = $%d", argNum))
@@ -188,12 +198,13 @@ func (r *postgresRepository) Update(ctx context.Context, id uuid.UUID, input Upd
 	}
 
 	query := fmt.Sprintf(
-		`UPDATE subscriptions SET %s WHERE id = $1 RETURNING id, tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
+		`UPDATE subscriptions SET %s WHERE id = $1 RETURNING id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
 		strings.Join(updates, ", "),
 	)
 
 	err := r.pool.QueryRow(ctx, query, args...).Scan(
-		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.SubscriptionKey, &sub.ExternalCustomerID,
+		&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		&sub.SubscriptionKey, &sub.ExternalCustomerID,
 		&sub.Status, &sub.ProviderName, &sub.ProviderSubscriptionID,
 		&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CanceledAt,
 		&sub.CancelAtPeriodEnd, &sub.Tags, &metadataJSON, &sub.CreatedAt, &sub.UpdatedAt,
@@ -273,7 +284,7 @@ func (r *postgresRepository) List(ctx context.Context, tenantID uuid.UUID, input
 	}
 
 	query := fmt.Sprintf(
-		`SELECT id, tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
+		`SELECT id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
 		 FROM subscriptions
 		 WHERE %s
 		 ORDER BY created_at ASC, id ASC
@@ -331,21 +342,23 @@ func (r *postgresRepository) Cancel(ctx context.Context, id uuid.UUID, atPeriodE
 	}
 
 	query := fmt.Sprintf(
-		`UPDATE subscriptions SET %s WHERE id = $1 RETURNING id, tenant_id, plan_id, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
+		`UPDATE subscriptions SET %s WHERE id = $1 RETURNING id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
 		updateClause,
 	)
 
 	var err error
 	if !atPeriodEnd {
 		err = r.pool.QueryRow(ctx, query, id, StatusCanceled, canceledAt).Scan(
-			&sub.ID, &sub.TenantID, &sub.PlanID, &sub.SubscriptionKey, &sub.ExternalCustomerID,
+			&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+			&sub.SubscriptionKey, &sub.ExternalCustomerID,
 			&sub.Status, &sub.ProviderName, &sub.ProviderSubscriptionID,
 			&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CanceledAt,
 			&sub.CancelAtPeriodEnd, &sub.Tags, &metadataJSON, &sub.CreatedAt, &sub.UpdatedAt,
 		)
 	} else {
 		err = r.pool.QueryRow(ctx, query, id).Scan(
-			&sub.ID, &sub.TenantID, &sub.PlanID, &sub.SubscriptionKey, &sub.ExternalCustomerID,
+			&sub.ID, &sub.TenantID, &sub.PlanID, &sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+			&sub.SubscriptionKey, &sub.ExternalCustomerID,
 			&sub.Status, &sub.ProviderName, &sub.ProviderSubscriptionID,
 			&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt, &sub.CanceledAt,
 			&sub.CancelAtPeriodEnd, &sub.Tags, &metadataJSON, &sub.CreatedAt, &sub.UpdatedAt,

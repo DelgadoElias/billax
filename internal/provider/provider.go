@@ -7,6 +7,7 @@ import (
 // PaymentProvider is the interface every payment connector must implement
 type PaymentProvider interface {
 	GetProviderName() string
+	Capabilities() ProviderCapabilities
 	CreateCharge(ctx context.Context, req ChargeRequest) (*ChargeResult, error)
 	RefundCharge(ctx context.Context, chargeID string, amount int64) (*RefundResult, error)
 	HandleWebhook(ctx context.Context, payload []byte, signature string) (*WebhookEvent, error)
