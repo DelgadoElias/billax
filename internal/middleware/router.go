@@ -9,7 +9,8 @@ import (
 )
 
 // NewRouter creates a new chi router with all middlewares
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int) chi.Router {
+// registerDomainRoutes is a callback to mount domain-specific routes on the /v1 group
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, registerDomainRoutes func(r chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middlewares (apply to all routes)
@@ -36,6 +37,11 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int) ch
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"tenant_id":"` + tenantID.String() + `"}`))
 		})
+
+		// Mount domain routes via callback
+		if registerDomainRoutes != nil {
+			registerDomainRoutes(r)
+		}
 	})
 
 	return r

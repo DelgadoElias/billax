@@ -11,9 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/DelgadoElias/billax/internal/config"
 	"github.com/DelgadoElias/billax/internal/db"
 	"github.com/DelgadoElias/billax/internal/middleware"
+	"github.com/DelgadoElias/billax/internal/payment"
+	"github.com/DelgadoElias/billax/internal/plan"
+	"github.com/DelgadoElias/billax/internal/provider"
+	"github.com/DelgadoElias/billax/internal/subscription"
 )
 
 func main() {
@@ -39,8 +45,32 @@ func main() {
 
 	logger.Info("database connected successfully")
 
-	// Create router with middlewares
-	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault)
+	// Initialize provider layer (empty for Week 2, will add Mercado Pago in Week 3)
+	registry := provider.NewRegistry()
+	// registry.Register(mercadopago.New())  ← Week 3
+	adapter := provider.NewAdapter(registry)
+
+	// Initialize repositories
+	planRepo := plan.NewRepository(pool)
+	subRepo := subscription.NewRepository(pool)
+	paymentRepo := payment.NewRepository(pool)
+
+	// Initialize services
+	planSvc := plan.NewService(planRepo)
+	subSvc := subscription.NewService(subRepo, planRepo, paymentRepo, adapter)
+	paySvc := payment.NewService(paymentRepo, adapter)
+
+	// Initialize handlers
+	planHandler := plan.NewHandler(planSvc)
+	subHandler := subscription.NewHandler(subSvc)
+	paymentHandler := payment.NewHandler(paySvc)
+
+	// Create router with domain routes registration callback
+	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault, func(r chi.Router) {
+		planHandler.RegisterRoutes(r)
+		subHandler.RegisterRoutes(r)
+		paymentHandler.RegisterRoutes(r)
+	})
 
 	// Start HTTP server
 	addr := net.JoinHostPort("", fmt.Sprintf("%d", cfg.Port))
