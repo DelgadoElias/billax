@@ -21,6 +21,7 @@ var (
 	ErrPayPerUseNotSupported = errors.New("provider does not support pay-per-use billing")
 	ErrPlansNotSupported     = errors.New("provider does not support plan-based billing")
 	ErrProviderRequired      = errors.New("a provider must be set to update amount")
+	ErrNotSupported          = errors.New("operation not supported by this provider")
 )
 
 // DomainError carries HTTP-level context for the handler layer
@@ -51,6 +52,8 @@ func HTTPStatusFor(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, ErrProviderError):
 		return http.StatusBadGateway
+	case errors.Is(err, ErrNotSupported):
+		return http.StatusNotImplemented
 	default:
 		return http.StatusInternalServerError
 	}
@@ -85,6 +88,8 @@ func CodeFor(err error) string {
 		return "provider_not_found"
 	case errors.Is(err, ErrProviderError):
 		return "provider_error"
+	case errors.Is(err, ErrNotSupported):
+		return "not_supported"
 	default:
 		return "internal_error"
 	}

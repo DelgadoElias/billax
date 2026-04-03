@@ -19,6 +19,7 @@ import (
 	"github.com/DelgadoElias/billax/internal/payment"
 	"github.com/DelgadoElias/billax/internal/plan"
 	"github.com/DelgadoElias/billax/internal/provider"
+	"github.com/DelgadoElias/billax/internal/provider/mercadopago"
 	"github.com/DelgadoElias/billax/internal/subscription"
 )
 
@@ -52,9 +53,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize provider layer (empty for Week 2, will add Mercado Pago in Week 3)
+	// Initialize provider layer
 	registry := provider.NewRegistry()
-	// registry.Register(mercadopago.New())  ← Week 3
+	registry.Register(mercadopago.New())
 	adapter := provider.NewAdapter(registry, yamlCaps)
 
 	// Initialize repositories
