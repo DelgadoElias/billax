@@ -20,6 +20,7 @@ import (
 	"github.com/DelgadoElias/billax/internal/plan"
 	"github.com/DelgadoElias/billax/internal/provider"
 	"github.com/DelgadoElias/billax/internal/provider/mercadopago"
+	"github.com/DelgadoElias/billax/internal/providercredentials"
 	"github.com/DelgadoElias/billax/internal/subscription"
 )
 
@@ -62,19 +63,23 @@ func main() {
 	planRepo := plan.NewRepository(pool)
 	subRepo := subscription.NewRepository(pool)
 	paymentRepo := payment.NewRepository(pool)
+	credRepo := providercredentials.NewRepository(pool)
 
 	// Initialize services
 	planSvc := plan.NewService(planRepo)
 	subSvc := subscription.NewService(subRepo, planRepo, paymentRepo, adapter)
 	paySvc := payment.NewService(paymentRepo, adapter)
+	credSvc := providercredentials.NewService(credRepo, adapter)
 
 	// Initialize handlers
 	planHandler := plan.NewHandler(planSvc)
 	subHandler := subscription.NewHandler(subSvc)
 	paymentHandler := payment.NewHandler(paySvc)
+	credHandler := providercredentials.NewHandler(credSvc)
 
 	// Create router with domain routes registration callback
 	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault, func(r chi.Router) {
+		credHandler.RegisterRoutes(r)
 		planHandler.RegisterRoutes(r)
 		subHandler.RegisterRoutes(r)
 		paymentHandler.RegisterRoutes(r)

@@ -101,3 +101,10 @@ func (a *ProviderAdapter) GetCapabilities(providerName string) ProviderCapabilit
 
 	return caps
 }
+
+// LookupProvider returns a registered payment provider by name
+// Used by the credentials service to validate provider existence
+// If the provider is not registered, returns ErrProviderNotFound
+func (a *ProviderAdapter) LookupProvider(providerName string) (PaymentProvider, error) {
+	return a.registry.Lookup(providerName)
+}
