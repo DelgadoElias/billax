@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/DelgadoElias/billax/internal/errors"
+	"github.com/DelgadoElias/billax/internal/metrics"
 	"github.com/DelgadoElias/billax/internal/middleware"
 	"github.com/DelgadoElias/billax/internal/provider"
 	"github.com/DelgadoElias/billax/internal/validation"
@@ -96,6 +97,15 @@ func (s *PaymentService) CreatePayment(ctx context.Context, input CreatePaymentI
 	if err != nil {
 		return Payment{}, false, fmt.Errorf("creating payment: %w", err)
 	}
+
+	// Instrument payment charge attempt: record success/failure by provider
+	// Success = provider accepted the charge (Pending or Succeeded)
+	// Failure = provider rejected the charge (Failed)
+	outcome := "failure"
+	if result.Payment.Status == StatusSucceeded || result.Payment.Status == StatusPending {
+		outcome = "success"
+	}
+	metrics.PaymentChargeAttempts.WithLabelValues(input.ProviderName, outcome).Inc()
 
 	return result.Payment, result.Created, nil
 }
