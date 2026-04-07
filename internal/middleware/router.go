@@ -10,10 +10,14 @@ import (
 
 // NewRouter creates a new chi router with all middlewares
 // registerDomainRoutes is a callback to mount domain-specific routes on the /v1 group
-func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, registerDomainRoutes func(r chi.Router)) chi.Router {
+func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, registerDomainRoutes func(r chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middlewares (apply to all routes)
+	// Metrics middleware must wrap all handlers to accurately measure latency
+	if metricsEnabled {
+		r.Use(MetricsMiddleware)
+	}
 	r.Use(RequestID)
 	r.Use(Logger(logger))
 	r.Use(Recovery(logger))

@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/DelgadoElias/billax/internal/config"
 	"github.com/DelgadoElias/billax/internal/db"
@@ -78,7 +80,7 @@ func main() {
 	credHandler := providercredentials.NewHandler(credSvc)
 
 	// Create router with domain routes registration callback
-	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault, func(r chi.Router) {
+	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, func(r chi.Router) {
 		credHandler.RegisterRoutes(r)
 		planHandler.RegisterRoutes(r)
 		subHandler.RegisterRoutes(r)
@@ -92,7 +94,23 @@ func main() {
 		Handler: router,
 	}
 
-	// Start server in a goroutine
+	// Start metrics server if enabled
+	var metricsServer *http.Server
+	if cfg.MetricsEnabled {
+		metricsAddr := net.JoinHostPort("", strconv.Itoa(cfg.MetricsPort))
+		metricsServer = &http.Server{
+			Addr:    metricsAddr,
+			Handler: promhttp.Handler(),
+		}
+		go func() {
+			logger.Info("starting metrics server", "addr", metricsAddr)
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("metrics server error", "error", err)
+			}
+		}()
+	}
+
+	// Start app server in a goroutine
 	go func() {
 		logger.Info("starting server", "addr", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -111,9 +129,17 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Shutdown app server
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("shutdown error", "error", err)
 		os.Exit(1)
+	}
+
+	// Shutdown metrics server if running
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			logger.Error("metrics server shutdown error", "error", err)
+		}
 	}
 
 	logger.Info("server stopped")
