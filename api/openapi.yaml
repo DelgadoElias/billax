@@ -1,0 +1,546 @@
+openapi: 3.1.0
+info:
+  title: billax
+  version: 0.1.0
+  description: Multi-tenant billing and subscription management engine
+  contact:
+    name: billax
+    url: https://github.com/DelgadoElias/billax
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.billax.io
+    description: Production server (example)
+
+paths:
+  /v1/plans:
+    post:
+      summary: Create or get a plan (idempotent by slug)
+      operationId: createPlan
+      tags:
+        - Plans
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlanRequest'
+      responses:
+        '201':
+          description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '200':
+          description: Plan already exists (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/subscriptions:
+    post:
+      summary: Create a subscription (plan-based or planless)
+      operationId: createSubscription
+      tags:
+        - Subscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+      responses:
+        '201':
+          description: Subscription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '200':
+          description: Subscription already exists (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unsupported feature for provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/subscriptions/{key}/payments:
+    post:
+      summary: Create a payment for a subscription (idempotent by key)
+      operationId: createPayment
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '200':
+          description: Payment already exists (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: payd_live_<key> or payd_test_<key>
+      description: Tenant API key issued by billax
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
+
+    ValidationErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ValidationError'
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+        - request_id
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code (e.g., subscription_not_found, invalid_input)
+          example: invalid_input
+        message:
+          type: string
+          description: Human-readable error message
+          example: "plan_id: must be a valid UUID"
+        request_id:
+          type: string
+          description: Unique request identifier for debugging
+          example: "req_01j0hk7gq9rkr1a2b3c4d5e6f7g8h9i0j"
+
+    ValidationError:
+      type: object
+      required:
+        - code
+        - message
+        - request_id
+        - fields
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: invalid_input
+        message:
+          type: string
+          description: Human-readable error message (often the first field error)
+          example: "currency: must be a supported ISO 4217 currency code (got \"XYZ\")"
+        request_id:
+          type: string
+          description: Unique request identifier for debugging
+          example: "req_01j0hk7gq9rkr1a2b3c4d5e6f7g8h9i0j"
+        fields:
+          type: array
+          description: Detailed validation errors by field
+          items:
+            $ref: '#/components/schemas/FieldError'
+          example:
+            - field: currency
+              message: "must be a supported ISO 4217 currency code (got \"XYZ\")"
+            - field: trial_days
+              message: "must not be negative"
+
+    FieldError:
+      type: object
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          description: Field name that failed validation
+          example: currency
+        message:
+          type: string
+          description: Validation error message
+          example: "must be a supported ISO 4217 currency code (got \"XYZ\")"
+
+    CreatePlanRequest:
+      type: object
+      required:
+        - slug
+        - name
+        - amount
+        - currency
+        - interval
+      properties:
+        slug:
+          type: string
+          description: Unique identifier for the plan (lowercase, hyphens)
+          example: pro-monthly
+        name:
+          type: string
+          description: Display name
+          example: Pro Monthly
+        description:
+          type: string
+          description: Plan description
+          example: Full access to all features
+        amount:
+          type: integer
+          description: Price in minor currency units (centavos for ARS)
+          example: 299900
+        currency:
+          type: string
+          description: ISO 4217 currency code
+          example: ARS
+        interval:
+          type: string
+          enum: [day, week, month, year]
+          example: month
+        interval_count:
+          type: integer
+          description: Billing cycle multiplier (1 = monthly, 2 = bimonthly)
+          example: 1
+        trial_days:
+          type: integer
+          description: Trial period in days
+          example: 14
+
+    Plan:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - slug
+        - name
+        - amount
+        - currency
+        - interval
+        - interval_count
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        amount:
+          type: integer
+        currency:
+          type: string
+        interval:
+          type: string
+        interval_count:
+          type: integer
+        trial_days:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSubscriptionRequest:
+      type: object
+      required:
+        - provider_name
+        - external_customer_id
+      properties:
+        plan_slug:
+          type: string
+          description: Plan slug (plan-based subscription)
+          example: pro-monthly
+        amount:
+          type: integer
+          description: Custom amount in minor currency units (planless subscription)
+          example: 1500000
+        currency:
+          type: string
+          description: ISO 4217 currency code (planless subscription)
+          example: ARS
+        interval:
+          type: string
+          enum: [day, week, month, year]
+          description: Billing interval (planless subscription)
+        interval_count:
+          type: integer
+          description: Billing cycle multiplier (planless subscription)
+          example: 1
+        provider_name:
+          type: string
+          example: mercadopago
+        external_customer_id:
+          type: string
+          example: cust_abc123
+        tags:
+          type: array
+          items:
+            type: string
+          example: [premium, latam]
+        metadata:
+          type: object
+          description: Arbitrary JSON metadata
+
+    Subscription:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - subscription_key
+        - status
+        - provider_name
+        - amount
+        - currency
+        - interval
+        - interval_count
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Plan reference (null for planless subscriptions)
+        subscription_key:
+          type: string
+          format: uuid
+          description: Stable subscription identifier
+        external_customer_id:
+          type: string
+        status:
+          type: string
+          enum: [trialing, active, past_due, canceled, expired]
+        provider_name:
+          type: string
+        provider_subscription_id:
+          type: string
+          nullable: true
+        amount:
+          type: integer
+          description: Amount in minor currency units
+        currency:
+          type: string
+        interval:
+          type: string
+        interval_count:
+          type: integer
+        current_period_start:
+          type: string
+          format: date-time
+          nullable: true
+        current_period_end:
+          type: string
+          format: date-time
+          nullable: true
+        trial_ends_at:
+          type: string
+          format: date-time
+          nullable: true
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancel_at_period_end:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+        payments:
+          type: array
+          description: Last 10 payments (embedded in GET response)
+          items:
+            $ref: '#/components/schemas/Payment'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreatePaymentRequest:
+      type: object
+      required:
+        - provider_name
+        - amount
+        - currency
+      properties:
+        provider_name:
+          type: string
+          example: mercadopago
+        amount:
+          type: integer
+          description: Amount in minor currency units
+          example: 299900
+        currency:
+          type: string
+          example: ARS
+        description:
+          type: string
+          example: Pro Monthly — March 2026
+        external_customer_id:
+          type: string
+          example: cust_abc123
+        metadata:
+          type: object
+          description: Arbitrary JSON metadata
+
+    Payment:
+      type: object
+      required:
+        - id
+        - tenant_id
+        - idempotency_key
+        - provider_name
+        - provider_charge_id
+        - amount
+        - currency
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        subscription_id:
+          type: string
+          format: uuid
+          nullable: true
+        idempotency_key:
+          type: string
+          format: uuid
+        provider_name:
+          type: string
+        provider_charge_id:
+          type: string
+        amount:
+          type: integer
+          description: Amount in minor currency units
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, succeeded, failed, refunded]
+        failure_reason:
+          type: string
+          nullable: true
+        payment_method:
+          type: object
+          nullable: true
+          description: Non-sensitive payment metadata (brand, last_four, etc.)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
