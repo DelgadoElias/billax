@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/DelgadoElias/billax/internal/httputil"
-	"github.com/DelgadoElias/billax/internal/middleware"
 	"github.com/DelgadoElias/billax/internal/payment"
 	"github.com/DelgadoElias/billax/internal/provider"
 )
