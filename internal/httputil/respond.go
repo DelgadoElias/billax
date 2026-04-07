@@ -7,6 +7,7 @@ import (
 
 	apperrors "github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/middleware"
+	"github.com/DelgadoElias/billax/internal/validation"
 )
 
 // errorBody is the standard error envelope
@@ -15,9 +16,10 @@ type errorBody struct {
 }
 
 type errorDetail struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id"`
+	Code      string                  `json:"code"`
+	Message   string                  `json:"message"`
+	RequestID string                  `json:"request_id"`
+	Fields    []validation.FieldError `json:"fields,omitempty"`
 }
 
 func RespondJSON(w http.ResponseWriter, status int, v any) {
@@ -39,14 +41,23 @@ func RespondError(w http.ResponseWriter, r *http.Request, err error) {
 		code = de.Code
 	}
 
+	detail := errorDetail{Code: code, Message: msg, RequestID: requestID}
+
+	// Check for ValidationError and expose structured field errors
+	var ve *validation.ValidationError
+	if errors.As(err, &ve) {
+		detail.Fields = ve.Fields
+	}
+
 	// Never expose raw internal errors to clients
 	if status == http.StatusInternalServerError {
-		msg = "an internal error occurred"
-		code = "internal_error"
+		detail.Message = "an internal error occurred"
+		detail.Code = "internal_error"
+		detail.Fields = nil // don't expose fields on 500s
 	}
 
 	RespondJSON(w, status, errorBody{
-		Error: errorDetail{Code: code, Message: msg, RequestID: requestID},
+		Error: detail,
 	})
 }
 
