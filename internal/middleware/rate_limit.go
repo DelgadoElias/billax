@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -121,7 +122,7 @@ func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
 
 			remaining := limiter.GetRemaining(tenantID)
 			w.Header().Set("X-RateLimit-Limit", "100")
-			w.Header().Set("X-RateLimit-Remaining", string(rune(remaining)))
+			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 			w.Header().Set("X-RateLimit-Reset", "60")
 
 			next.ServeHTTP(w, r)

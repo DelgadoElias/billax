@@ -113,9 +113,11 @@ func AuthMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 
 // setRLSContext sets the RLS context in the database
 func setRLSContext(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID) error {
-	// For now, we'll just set it in a simple query
-	// In a real implementation, you'd want to use a transaction
-	_, err := pool.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, true)", tenantID.String())
+	// TODO: Full fix requires per-request connection pinning with SET LOCAL inside each repository transaction.
+	// Using false (session-local) instead of true (transaction-local) since this runs on a pooled connection
+	// without an actual transaction. This ensures the setting persists on this connection for this session only.
+	// See: https://www.postgresql.org/docs/15/sql-set.html
+	_, err := pool.Exec(ctx, "SELECT set_config('app.current_tenant_id', $1, false)", tenantID.String())
 	return err
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/httputil"
 )
 
@@ -32,7 +33,7 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	// Extract Idempotency-Key header
 	idempotencyKey := r.Header.Get("Idempotency-Key")
 	if idempotencyKey == "" {
-		httputil.RespondError(w, r, nil)
+		httputil.RespondError(w, r, errors.ErrMissingIdempotencyKey)
 		return
 	}
 
@@ -87,7 +88,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListBySubscription(w http.ResponseWriter, r *http.Request) {
 	subscriptionKey := chi.URLParam(r, "subscriptionKey")
 	if subscriptionKey == "" {
-		httputil.RespondError(w, r, nil)
+		httputil.RespondError(w, r, errors.ErrInvalidInput)
 		return
 	}
 

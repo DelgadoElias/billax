@@ -26,20 +26,11 @@ func (h *Handler) SetProviderCredentials(w http.ResponseWriter, r *http.Request)
 	tenantID := middleware.TenantIDFromContext(r.Context())
 	providerName := chi.URLParam(r, "provider")
 
-	// Parse request body
-	var input struct {
-		AccessToken   string `json:"access_token"`
-		WebhookSecret string `json:"webhook_secret"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	// Parse request body as a generic map to support any provider-specific fields
+	var config map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
 		httputil.RespondError(w, r, err)
 		return
-	}
-
-	// Convert to config map
-	config := map[string]string{
-		"access_token":   input.AccessToken,
-		"webhook_secret": input.WebhookSecret,
 	}
 
 	// Validate and store

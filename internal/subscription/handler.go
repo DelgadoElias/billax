@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/httputil"
 )
 
@@ -33,7 +34,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	// Check for Idempotency-Key header
 	if r.Header.Get("Idempotency-Key") == "" {
-		httputil.RespondError(w, r, nil)
+		httputil.RespondError(w, r, errors.ErrMissingIdempotencyKey)
 		return
 	}
 
@@ -86,7 +87,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetByKey(w http.ResponseWriter, r *http.Request) {
 	subscriptionKey := chi.URLParam(r, "subscriptionKey")
 	if subscriptionKey == "" {
-		httputil.RespondError(w, r, nil)
+		httputil.RespondError(w, r, errors.ErrInvalidInput)
 		return
 	}
 
@@ -109,7 +110,7 @@ func (h *Handler) GetByKey(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	subscriptionKey := chi.URLParam(r, "subscriptionKey")
 	if subscriptionKey == "" {
-		httputil.RespondError(w, r, nil)
+		httputil.RespondError(w, r, errors.ErrInvalidInput)
 		return
 	}
 
@@ -177,7 +178,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
 	subscriptionKey := chi.URLParam(r, "subscriptionKey")
 	if subscriptionKey == "" {
-		httputil.RespondError(w, r, nil)
+		httputil.RespondError(w, r, errors.ErrInvalidInput)
 		return
 	}
 
