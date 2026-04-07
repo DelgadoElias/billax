@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -39,6 +40,13 @@ func (s *CredentialsService) SetProviderConfig(ctx context.Context, tenantID uui
 	}
 	if len(config) == 0 {
 		return fmt.Errorf("set provider config: config cannot be empty: %w", errors.ErrInvalidInput)
+	}
+
+	// Validate that no config keys or values are empty strings
+	for k, v := range config {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return fmt.Errorf("set provider config: config keys and values must be non-empty strings: %w", errors.ErrInvalidInput)
+		}
 	}
 
 	// Step 1: Verify provider is registered in the adapter
