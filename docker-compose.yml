@@ -18,5 +18,62 @@ services:
       timeout: 5s
       retries: 5
 
+  payd:
+    build: .
+    container_name: payd_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://payd_app:devpassword@postgres:5432/payd?sslmode=disable
+      APP_ENV: development
+      PORT: 8080
+      METRICS_ENABLED: "true"
+      METRICS_PORT: 9090
+      LOG_LEVEL: info
+      RATE_LIMIT_DEFAULT: 100
+      PROVIDERS_CONFIG_PATH: providers.yml
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    profiles:
+      - observability
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: payd_prometheus
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9091:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    depends_on:
+      - payd
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: payd_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    profiles:
+      - observability
+
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:

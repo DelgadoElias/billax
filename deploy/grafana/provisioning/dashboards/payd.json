@@ -1,0 +1,114 @@
+{
+  "dashboard": {
+    "title": "payd — Operational Overview",
+    "uid": "payd-ops",
+    "version": 1,
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "Request Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(payd_http_requests_total[1m])",
+            "legendFormat": "{{path}}"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+      },
+      {
+        "title": "Error Rate %",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(payd_http_requests_total{status_code=~\"5..\"}[1m]) / rate(payd_http_requests_total[1m]) * 100",
+            "legendFormat": "Error Rate"
+          }
+        ],
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+      },
+      {
+        "title": "P99 Latency (seconds)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(payd_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{path}}"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+      },
+      {
+        "title": "P50 Latency (seconds)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(payd_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{path}}"
+          }
+        ],
+        "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 }
+      },
+      {
+        "title": "In-Flight Requests",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "payd_http_in_flight_requests"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 16, "w": 6, "h": 6 }
+      },
+      {
+        "title": "Payment Success Rate by Provider",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(payd_payment_charge_attempts_total{outcome=\"success\"}[5m]) / rate(payd_payment_charge_attempts_total[5m]) * 100",
+            "legendFormat": "{{provider}}"
+          }
+        ],
+        "gridPos": { "x": 6, "y": 16, "w": 18, "h": 8 }
+      },
+      {
+        "title": "Payment Attempts by Provider",
+        "type": "barchart",
+        "targets": [
+          {
+            "expr": "sum(payd_payment_charge_attempts_total) by (provider, outcome)"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 }
+      },
+      {
+        "title": "Active Subscriptions by Status",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "payd_active_subscriptions"
+          }
+        ],
+        "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 }
+      },
+      {
+        "title": "HTTP Status Distribution",
+        "type": "barchart",
+        "targets": [
+          {
+            "expr": "sum(payd_http_requests_total) by (status_code)"
+          }
+        ],
+        "gridPos": { "x": 0, "y": 32, "w": 24, "h": 8 }
+      }
+    ],
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "templating": {
+      "list": []
+    }
+  },
+  "overwrite": true
+}
