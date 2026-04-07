@@ -3,13 +3,13 @@ package plan
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/middleware"
+	"github.com/DelgadoElias/billax/internal/validation"
 )
 
 type PlanService struct {
@@ -83,6 +83,11 @@ func (s *PlanService) GetBySlug(ctx context.Context, slug string) (Plan, error) 
 
 // Update applies partial updates to a plan
 func (s *PlanService) Update(ctx context.Context, id uuid.UUID, input UpdatePlanInput) (Plan, error) {
+	// Validate input before update
+	if err := s.validateUpdateInput(input); err != nil {
+		return Plan{}, err
+	}
+
 	plan, err := s.repo.Update(ctx, id, input)
 	if err != nil {
 		return Plan{}, err
@@ -95,6 +100,15 @@ func (s *PlanService) List(ctx context.Context, input ListPlansInput) (ListPlans
 	tenantID := middleware.TenantIDFromContext(ctx)
 	if tenantID == uuid.Nil {
 		return ListPlansResult{}, errors.ErrMissingTenantID
+	}
+
+	// Cap limit to prevent excessive results
+	const MaxLimitParam = 100
+	if input.Limit <= 0 {
+		input.Limit = 20
+	}
+	if input.Limit > MaxLimitParam {
+		input.Limit = MaxLimitParam
 	}
 
 	result, err := s.repo.List(ctx, tenantID, input)
@@ -116,33 +130,79 @@ func (s *PlanService) Delete(ctx context.Context, id uuid.UUID) error {
 
 // validateCreateInput validates the plan creation input
 func (s *PlanService) validateCreateInput(input CreatePlanInput) error {
-	// Validate slug: non-empty, lowercase, alphanumeric + hyphens
-	slug := strings.ToLower(strings.TrimSpace(input.Slug))
-	if slug == "" {
-		return errors.ErrInvalidInput
-	}
-
-	slugPattern := regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$|^[a-z0-9]$`)
-	if !slugPattern.MatchString(slug) {
-		return errors.ErrInvalidInput
-	}
+	v := &validation.ValidationError{}
 
 	// Validate name
-	if strings.TrimSpace(input.Name) == "" {
-		return errors.ErrInvalidInput
+	v.Add(validation.NonEmpty("name", input.Name))
+	v.Add(validation.MaxLength("name", input.Name, 255))
+
+	// Validate slug format
+	v.Add(validation.NonEmpty("slug", input.Slug))
+	slug := strings.ToLower(strings.TrimSpace(input.Slug))
+	if slug != "" && !isValidSlugFormat(slug) {
+		v.Add(&validation.FieldError{
+			Field:   "slug",
+			Message: "must be lowercase alphanumeric with hyphens, 1-64 chars",
+		})
 	}
 
-	// Validate amount > 0
-	if input.Amount <= 0 {
-		return errors.ErrInvalidInput
+	// Validate amount
+	v.Add(validation.PositiveInt("amount", input.Amount))
+
+	// Validate currency
+	if input.Currency != "" {
+		v.Add(validation.ISOCurrency("currency", input.Currency))
 	}
 
 	// Validate interval
-	switch input.Interval {
-	case IntervalDay, IntervalWeek, IntervalMonth, IntervalYear:
-	default:
-		return errors.ErrInvalidInput
+	if input.Interval != "" {
+		allowedIntervals := []string{string(IntervalDay), string(IntervalWeek), string(IntervalMonth), string(IntervalYear)}
+		v.Add(validation.ValidEnum("interval", string(input.Interval), allowedIntervals))
 	}
 
-	return nil
+	// Validate trial_days is not negative
+	if input.TrialDays < 0 {
+		v.Add(&validation.FieldError{Field: "trial_days", Message: "must not be negative"})
+	}
+
+	return v.Err()
+}
+
+// validateUpdateInput validates the plan update input
+func (s *PlanService) validateUpdateInput(input UpdatePlanInput) error {
+	v := &validation.ValidationError{}
+
+	if input.Name != nil {
+		v.Add(validation.NonEmpty("name", *input.Name))
+		v.Add(validation.MaxLength("name", *input.Name, 255))
+	}
+
+	return v.Err()
+}
+
+// isValidSlugFormat checks if a slug matches the allowed pattern
+func isValidSlugFormat(slug string) bool {
+	// Pattern: lowercase alphanumeric + hyphens, 1-64 chars
+	// Must start and end with alphanumeric if more than 1 char
+	if len(slug) == 0 || len(slug) > 64 {
+		return false
+	}
+	if len(slug) == 1 {
+		return isAlphanumericLower(rune(slug[0]))
+	}
+	// Multi-char: must start and end with alphanumeric
+	if !isAlphanumericLower(rune(slug[0])) || !isAlphanumericLower(rune(slug[len(slug)-1])) {
+		return false
+	}
+	// All chars must be alphanumeric or hyphen
+	for _, ch := range slug {
+		if !isAlphanumericLower(ch) && ch != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func isAlphanumericLower(ch rune) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
 }
