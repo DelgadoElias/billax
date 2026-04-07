@@ -17,6 +17,7 @@ import (
 
 	"github.com/DelgadoElias/billax/internal/config"
 	"github.com/DelgadoElias/billax/internal/db"
+	"github.com/DelgadoElias/billax/internal/metrics"
 	"github.com/DelgadoElias/billax/internal/middleware"
 	"github.com/DelgadoElias/billax/internal/payment"
 	"github.com/DelgadoElias/billax/internal/plan"
@@ -87,6 +88,13 @@ func main() {
 		paymentHandler.RegisterRoutes(r)
 	})
 
+	// Create context for background tasks (poller, etc.)
+	// This will be cancelled during graceful shutdown
+	pollerCtx, pollerCancel := context.WithCancel(context.Background())
+
+	// Start background poller for subscription metrics
+	go startSubscriptionMetricsPoller(pollerCtx, logger, subRepo)
+
 	// Start HTTP server
 	addr := net.JoinHostPort("", fmt.Sprintf("%d", cfg.Port))
 	server := &http.Server{
@@ -129,6 +137,9 @@ func main() {
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Cancel background tasks (poller)
+	pollerCancel()
+
 	// Shutdown app server
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("shutdown error", "error", err)
@@ -161,5 +172,37 @@ func initLogger(level string) *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: logLevel,
 	}))
+}
+
+// startSubscriptionMetricsPoller polls the database for subscription counts
+// and updates the active subscriptions gauge every 30 seconds
+func startSubscriptionMetricsPoller(ctx context.Context, logger *slog.Logger, subRepo subscription.SubscriptionRepo) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			counts, err := subRepo.CountByStatus(ctx)
+			if err != nil {
+				logger.Warn("failed to update subscription metrics", "error", err)
+				continue
+			}
+
+			// Reset all known status gauges, then set observed values
+			for _, status := range []string{"trialing", "active", "past_due", "canceled", "expired"} {
+				metrics.ActiveSubscriptions.WithLabelValues(status).Set(0)
+			}
+
+			// Set observed counts
+			for status, count := range counts {
+				metrics.ActiveSubscriptions.WithLabelValues(string(status)).Set(float64(count))
+			}
+
+		case <-ctx.Done():
+			logger.Debug("subscription metrics poller stopped")
+			return
+		}
+	}
 }
 

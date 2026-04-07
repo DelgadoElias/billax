@@ -23,6 +23,7 @@ type SubscriptionRepo interface {
 	Update(ctx context.Context, id uuid.UUID, input UpdateSubscriptionInput) (Subscription, error)
 	List(ctx context.Context, tenantID uuid.UUID, input ListSubscriptionsInput) (ListSubscriptionsResult, error)
 	Cancel(ctx context.Context, id uuid.UUID, atPeriodEnd bool) (Subscription, error)
+	CountByStatus(ctx context.Context) (map[Status]int64, error)
 }
 
 type postgresRepository struct {
@@ -377,4 +378,32 @@ func (r *postgresRepository) Cancel(ctx context.Context, id uuid.UUID, atPeriodE
 	}
 
 	return sub, nil
+}
+
+// CountByStatus returns the count of subscriptions grouped by status
+// This is used by metrics collection and does not filter by tenant
+func (r *postgresRepository) CountByStatus(ctx context.Context) (map[Status]int64, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT status, COUNT(*) FROM subscriptions GROUP BY status`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("count subscriptions by status: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[Status]int64)
+	for rows.Next() {
+		var status Status
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("scan status count: %w", err)
+		}
+		counts[status] = count
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return counts, nil
 }
