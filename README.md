@@ -48,30 +48,39 @@ Docker Compose in one command. No proprietary cloud services. PostgreSQL is your
 
 ## Quick start
 
+### Local development (with observability)
+
 ```bash
 git clone https://github.com/DelgadoElias/billax.git
 cd billax
 
-# Start the database
-docker-compose up -d
+# Start the full stack: app, database, Prometheus, Grafana
+docker-compose --profile observability up -d
 
 # Apply migrations
 docker exec payd_db psql -U payd_app -d payd < migrations/001_init.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/002_plan_slug_subscription_tags.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/003_planless_subscriptions.sql
 
-# Configure environment
+# Configure environment (optional in dev)
 cp .env.example .env
-# Edit DATABASE_URL if needed
 
-# Run
-go run ./cmd/payd
+# App is ready at http://localhost:8080
+# Grafana dashboard at http://localhost:3000 (admin/admin)
+# Prometheus metrics at http://localhost:9091
 ```
 
 Health check:
 ```bash
 curl http://localhost:8080/health
 # {"status":"ok","version":"0.1.0"}
+```
+
+### Running without observability
+
+```bash
+docker-compose up -d  # omit --profile observability
+go run ./cmd/payd
 ```
 
 ---
@@ -88,6 +97,8 @@ billax is configured via environment variables with sensible defaults.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `RATE_LIMIT_DEFAULT` | `100` | Requests per minute per tenant |
 | `PROVIDERS_CONFIG_PATH` | `providers.yml` | Path to provider capability gates |
+| `METRICS_ENABLED` | `true` | Enable Prometheus metrics endpoint |
+| `METRICS_PORT` | `9090` | Port for `/metrics` endpoint |
 
 ### `providers.yml` — capability gates
 
@@ -120,6 +131,32 @@ Every request to `/v1/*` requires an API key issued per tenant:
 ```
 Authorization: Bearer payd_live_<key>
 ```
+
+### Error responses
+
+All errors are returned as a structured JSON envelope with an optional `fields` array for validation errors:
+
+```json
+{
+  "error": {
+    "code": "invalid_input",
+    "message": "currency: must be a supported ISO 4217 currency code (got \"XYZ\")",
+    "request_id": "req_01j0hk7gq9rkr1a2b3c4d5e6f7g8h9i0j",
+    "fields": [
+      {
+        "field": "currency",
+        "message": "must be a supported ISO 4217 currency code (got \"XYZ\")"
+      },
+      {
+        "field": "trial_days",
+        "message": "must not be negative"
+      }
+    ]
+  }
+}
+```
+
+The `fields` array is only present for validation errors (HTTP 400). Other error types omit it.
 
 ### Plans
 
@@ -230,7 +267,7 @@ registry.Register(helipagos.New())
 ```
 
 billax ships with connectors for:
-- [ ] Mercado Pago (Week 3)
+- [x] Mercado Pago (production-ready)
 - [ ] Helipagos (planned)
 - [ ] Stripe (planned)
 
@@ -285,6 +322,34 @@ providers.yml              ← deployment-level capability gates
 - **Webhook signatures**: outbound webhooks signed with HMAC-SHA256
 - **Inbound webhooks**: provider signature validated before any processing
 - **Rate limiting**: per-tenant token bucket, default 100 req/min, configurable
+
+---
+
+## Observability
+
+billax exposes Prometheus metrics and includes Grafana dashboards for operational visibility.
+
+### Starting the observability stack
+
+```bash
+docker-compose --profile observability up -d
+```
+
+This brings up:
+- **Prometheus** (http://localhost:9091) — scrapes metrics from `/metrics` every 15s
+- **Grafana** (http://localhost:3000) — dashboards auto-provisioned from `deploy/grafana/provisioning/`
+  - Username: `admin` / Password: `admin`
+  - Dashboard: "payd — Operational Overview" shows request rates, latency percentiles, error rates, and payment success rates by provider
+
+### Metrics exposed
+
+- `payd_http_requests_total` — total HTTP requests by status code and path
+- `payd_http_request_duration_seconds` — request latency histogram (p50, p99, etc.)
+- `payd_http_in_flight_requests` — concurrent in-flight requests
+- `payd_payment_charge_attempts_total` — payment charge attempts by provider and outcome (success/failure)
+- `payd_active_subscriptions` — current subscription count by status (updated every 30 seconds)
+
+For details on interpreting the dashboard, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ---
 
