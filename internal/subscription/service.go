@@ -13,6 +13,12 @@ import (
 	"github.com/DelgadoElias/billax/internal/payment"
 	"github.com/DelgadoElias/billax/internal/plan"
 	"github.com/DelgadoElias/billax/internal/provider"
+	"github.com/DelgadoElias/billax/internal/validation"
+)
+
+const (
+	MaxTagCount  = 20
+	MaxTagLength = 50
 )
 
 type SubscriptionService struct {
@@ -83,20 +89,20 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 			trialEndsAt = &trialEnd
 		}
 	} else {
-		// Planless path
-		if input.Amount <= 0 {
-			return Subscription{}, errors.ErrInvalidInput
-		}
-		if input.Currency == "" {
-			return Subscription{}, errors.ErrInvalidInput
+		// Planless path — validate inputs with strict rules
+		v := &validation.ValidationError{}
+		v.Add(validation.PositiveInt("amount", input.Amount))
+		v.Add(validation.NonEmpty("currency", input.Currency))
+		if input.Currency != "" {
+			v.Add(validation.ISOCurrency("currency", input.Currency))
 		}
 		// interval validation: "day", "week", "month", "year"
-		if input.Interval != plan.IntervalDay && input.Interval != plan.IntervalWeek &&
-			input.Interval != plan.IntervalMonth && input.Interval != plan.IntervalYear {
-			return Subscription{}, errors.ErrInvalidInput
-		}
-		if input.IntervalCount <= 0 {
-			return Subscription{}, errors.ErrInvalidInput
+		allowedIntervals := []string{string(plan.IntervalDay), string(plan.IntervalWeek), string(plan.IntervalMonth), string(plan.IntervalYear)}
+		v.Add(validation.ValidEnum("interval", string(input.Interval), allowedIntervals))
+		v.Add(validation.MinInt("interval_count", int64(input.IntervalCount), 1))
+
+		if err := v.Err(); err != nil {
+			return Subscription{}, err
 		}
 
 		amount = input.Amount
@@ -104,6 +110,20 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 		interval = input.Interval
 		intervalCount = input.IntervalCount
 		// planless subs have no trial
+	}
+
+	// Validate external_customer_id length
+	if input.ExternalCustomerID != "" {
+		if fe := validation.MaxLength("external_customer_id", input.ExternalCustomerID, 255); fe != nil {
+			v := &validation.ValidationError{}
+			v.Add(fe)
+			return Subscription{}, v.Err()
+		}
+	}
+
+	// Validate tags before creating
+	if err := s.validateTags(input.Tags); err != nil {
+		return Subscription{}, err
 	}
 
 	// Calculate period end
@@ -163,7 +183,7 @@ func (s *SubscriptionService) GetByID(ctx context.Context, id uuid.UUID) (Subscr
 
 // Update applies partial updates to a subscription
 func (s *SubscriptionService) Update(ctx context.Context, id uuid.UUID, input UpdateSubscriptionInput) (Subscription, error) {
-	// Fetch current subscription to check capabilities for amount update
+	// Fetch current subscription to check capabilities and transitions
 	currentSub, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return Subscription{}, err
@@ -180,8 +200,18 @@ func (s *SubscriptionService) Update(ctx context.Context, id uuid.UUID, input Up
 		}
 	}
 
-	// Normalize tags if provided
-	if input.TagsProvided && input.Tags != nil {
+	// Validate status transition if provided
+	if input.Status != nil {
+		if err := s.validateStatusTransition(currentSub.Status, *input.Status); err != nil {
+			return Subscription{}, err
+		}
+	}
+
+	// Validate and normalize tags if provided
+	if input.TagsProvided {
+		if err := s.validateTags(input.Tags); err != nil {
+			return Subscription{}, err
+		}
 		input.Tags = s.normalizeTags(input.Tags)
 	}
 
@@ -198,6 +228,27 @@ func (s *SubscriptionService) List(ctx context.Context, input ListSubscriptionsI
 	tenantID := middleware.TenantIDFromContext(ctx)
 	if tenantID == uuid.Nil {
 		return ListSubscriptionsResult{}, errors.ErrMissingTenantID
+	}
+
+	// Validate status filter values
+	allowedStatuses := []string{string(StatusTrialing), string(StatusActive), string(StatusPastDue), string(StatusCanceled), string(StatusExpired)}
+	v := &validation.ValidationError{}
+	for i, status := range input.Status {
+		if status != "" {
+			v.Add(validation.ValidEnum(fmt.Sprintf("status[%d]", i), string(status), allowedStatuses))
+		}
+	}
+	if err := v.Err(); err != nil {
+		return ListSubscriptionsResult{}, err
+	}
+
+	// Cap limit
+	const MaxLimitParam = 100
+	if input.Limit <= 0 {
+		input.Limit = 20
+	}
+	if input.Limit > MaxLimitParam {
+		input.Limit = MaxLimitParam
 	}
 
 	result, err := s.repo.List(ctx, tenantID, input)
@@ -239,6 +290,59 @@ func (s *SubscriptionService) calculatePeriodEnd(start time.Time, interval plan.
 	default:
 		return start.AddDate(0, 1, 0) // default to 1 month
 	}
+}
+
+// validateTags validates tag count and individual tag lengths
+func (s *SubscriptionService) validateTags(tags []string) error {
+	v := &validation.ValidationError{}
+
+	if len(tags) > MaxTagCount {
+		v.Add(&validation.FieldError{
+			Field:   "tags",
+			Message: fmt.Sprintf("must not exceed %d tags", MaxTagCount),
+		})
+	}
+
+	for i, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if len(trimmed) > MaxTagLength {
+			v.Add(&validation.FieldError{
+				Field:   fmt.Sprintf("tags[%d]", i),
+				Message: fmt.Sprintf("must be at most %d characters", MaxTagLength),
+			})
+		}
+	}
+
+	return v.Err()
+}
+
+// validateStatusTransition checks if a status transition is allowed
+func (s *SubscriptionService) validateStatusTransition(current, next Status) error {
+	// Define forbidden transitions
+	forbiddenTransitions := map[Status]map[Status]bool{
+		StatusCanceled: {
+			StatusActive:   true,
+			StatusTrialing: true,
+			StatusPastDue:  true,
+		},
+		StatusExpired: {
+			StatusActive:   true,
+			StatusTrialing: true,
+		},
+	}
+
+	if forbidden, ok := forbiddenTransitions[current]; ok {
+		if forbidden[next] {
+			return &errors.DomainError{
+				Code:       "invalid_status_transition",
+				Message:    fmt.Sprintf("cannot transition from %s to %s", current, next),
+				HTTPStatus: 422,
+				Cause:      errors.ErrInvalidInput,
+			}
+		}
+	}
+
+	return nil
 }
 
 // normalizeTags lowercases and deduplicates tags
