@@ -3,12 +3,14 @@ package payment
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/middleware"
 	"github.com/DelgadoElias/billax/internal/provider"
+	"github.com/DelgadoElias/billax/internal/validation"
 )
 
 type PaymentService struct {
@@ -34,12 +36,27 @@ func (s *PaymentService) CreatePayment(ctx context.Context, input CreatePaymentI
 	}
 
 	// Validate input
-	if input.IdempotencyKey == "" {
-		return Payment{}, false, errors.ErrMissingIdempotencyKey
+	v := &validation.ValidationError{}
+	v.Add(validation.NonEmpty("idempotency_key", input.IdempotencyKey))
+	v.Add(validation.NonEmpty("provider_name", input.ProviderName))
+	v.Add(validation.PositiveInt("amount", input.Amount))
+	if input.Currency != "" {
+		v.Add(validation.ISOCurrency("currency", input.Currency))
 	}
 
-	if input.Amount <= 0 {
-		return Payment{}, false, errors.ErrInvalidInput
+	// Validate provider config: no empty keys or values
+	for k, val := range input.ProviderConfig {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(val) == "" {
+			v.Add(&validation.FieldError{
+				Field:   "provider_config",
+				Message: "config keys and values must be non-empty strings",
+			})
+			break
+		}
+	}
+
+	if err := v.Err(); err != nil {
+		return Payment{}, false, err
 	}
 
 	// Call the provider adapter to create the charge
@@ -97,6 +114,15 @@ func (s *PaymentService) List(ctx context.Context, input ListPaymentsInput) (Lis
 	tenantID := middleware.TenantIDFromContext(ctx)
 	if tenantID == uuid.Nil {
 		return ListPaymentsResult{}, errors.ErrMissingTenantID
+	}
+
+	// Cap limit
+	const MaxLimitParam = 100
+	if input.Limit <= 0 {
+		input.Limit = 20
+	}
+	if input.Limit > MaxLimitParam {
+		input.Limit = MaxLimitParam
 	}
 
 	result, err := s.repo.List(ctx, tenantID, input)
