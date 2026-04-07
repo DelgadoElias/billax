@@ -6,11 +6,15 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "startCommand": "./billax",
+    "startCommand": "./payd",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30
   },
   "variables": {
+    "DATABASE_URL": {
+      "description": "PostgreSQL connection string (auto-set by Railway Postgres plugin)",
+      "value": ""
+    },
     "APP_ENV": {
       "description": "Environment: development or production",
       "value": "production"
@@ -26,6 +30,14 @@
     "RATE_LIMIT_DEFAULT": {
       "description": "Default rate limit in requests per minute",
       "value": "100"
+    },
+    "METRICS_ENABLED": {
+      "description": "Enable Prometheus metrics endpoint",
+      "value": "true"
+    },
+    "METRICS_PORT": {
+      "description": "Port for Prometheus /metrics endpoint",
+      "value": "9090"
     },
     "PROVIDERS_CONFIG_PATH": {
       "description": "Path to providers.yml file",

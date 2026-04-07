@@ -48,6 +48,14 @@ Docker Compose in one command. No proprietary cloud services. PostgreSQL is your
 
 ## Quick start
 
+### Deploy to Railway (one-click)
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new?templateId=https://github.com/DelgadoElias/billax)
+
+This creates a production-ready billax instance on Railway with PostgreSQL, all in ~3 minutes.
+
+After deployment, see [docs/RAILWAY_DEPLOYMENT.md](docs/RAILWAY_DEPLOYMENT.md) for post-deployment setup (migrations, credentials, webhooks).
+
 ### Local development (with observability)
 
 ```bash
