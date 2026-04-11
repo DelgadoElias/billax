@@ -29,6 +29,14 @@ type Config struct {
 	CredentialsEncryptionKey  []byte        // 32 bytes from CREDENTIALS_ENCRYPTION_KEY hex env var
 	LifecycleJobInterval      time.Duration // interval for subscription lifecycle jobs (renewals, expiry)
 	PastDueGracePeriodDays    int           // grace period before expiring past_due subscriptions
+	BackofficeJWTSecret       string        // secret for backoffice JWT token signing (required if backoffice is active)
+	BackofficeJWTTTL          time.Duration // TTL for backoffice JWT tokens (default 24h)
+
+	// Bootstrap: auto-create first tenant on startup (like Grafana)
+	BootstrapTenantName    string // BOOTSTRAP_TENANT_NAME
+	BootstrapTenantEmail   string // BOOTSTRAP_TENANT_EMAIL
+	BootstrapAdminPassword string // BOOTSTRAP_ADMIN_PASSWORD
+	BootstrapTenantSlug    string // BOOTSTRAP_TENANT_SLUG (optional)
 }
 
 // Load reads configuration from environment variables with validation
@@ -52,6 +60,12 @@ func Load() (*Config, error) {
 		MetricsPort:         getEnvInt("METRICS_PORT", 9090),
 		LifecycleJobInterval:  getEnvDuration("LIFECYCLE_JOB_INTERVAL", 5*time.Minute),
 		PastDueGracePeriodDays: getEnvInt("PAST_DUE_GRACE_PERIOD_DAYS", 7),
+		BackofficeJWTSecret:    getEnv("BACKOFFICE_JWT_SECRET", ""),
+		BackofficeJWTTTL:       getEnvDuration("BACKOFFICE_JWT_TTL", 24*time.Hour),
+		BootstrapTenantName:    os.Getenv("BOOTSTRAP_TENANT_NAME"),
+		BootstrapTenantEmail:   os.Getenv("BOOTSTRAP_TENANT_EMAIL"),
+		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
+		BootstrapTenantSlug:    os.Getenv("BOOTSTRAP_TENANT_SLUG"),
 	}
 
 	// Parse encryption key from hex (optional, required in production)
@@ -74,6 +88,15 @@ func Load() (*Config, error) {
 	// Validate production requirements
 	if cfg.AppEnv == "production" && len(cfg.CredentialsEncryptionKey) == 0 {
 		return nil, fmt.Errorf("CREDENTIALS_ENCRYPTION_KEY is required in production")
+	}
+
+	// Validate backoffice JWT secret if backoffice is enabled
+	if cfg.BackofficeJWTSecret == "" {
+		if cfg.AppEnv == "production" {
+			return nil, fmt.Errorf("BACKOFFICE_JWT_SECRET is required in production")
+		}
+		// Use a default in development for convenience
+		cfg.BackofficeJWTSecret = "dev-jwt-secret-change-in-production"
 	}
 
 	return cfg, nil

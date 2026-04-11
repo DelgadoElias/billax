@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,14 +10,19 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/DelgadoElias/billax/internal/backoffice"
 	"github.com/DelgadoElias/billax/internal/config"
 	"github.com/DelgadoElias/billax/internal/db"
+	apperrors "github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/metrics"
 	"github.com/DelgadoElias/billax/internal/middleware"
 	"github.com/DelgadoElias/billax/internal/payment"
@@ -31,6 +37,28 @@ import (
 
 // version is set via ldflags during build: -X 'main.version=x.y.z'
 var version = "dev"
+
+// backofficeServiceWrapper adapts backoffice.BackofficeService to tenant.BackofficeService interface
+type backofficeServiceWrapper struct {
+	svc *backoffice.BackofficeService
+}
+
+func (w *backofficeServiceWrapper) CreateUser(ctx, tenantID interface{}, email, name, password string, role interface{}) (interface{}, error) {
+	// Convert interface{} to proper types
+	contextVal, ok := ctx.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid context type")
+	}
+
+	tenantIDVal, ok := tenantID.(uuid.UUID)
+	if !ok {
+		return nil, fmt.Errorf("invalid tenant ID type")
+	}
+
+	roleVal := backoffice.Role(role.(string))
+
+	return w.svc.CreateUser(contextVal, tenantIDVal, email, name, password, roleVal)
+}
 
 func main() {
 	// Load configuration
@@ -65,6 +93,11 @@ func main() {
 
 	logger.Info("database connected successfully")
 
+	// Bootstrap first tenant if configured
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	bootstrapTenant(bootstrapCtx, pool, cfg, logger)
+	bootstrapCancel()
+
 	// Load provider capabilities from YAML
 	yamlCaps, err := provider.LoadCapabilitiesFile(cfg.ProvidersConfigPath)
 	if err != nil {
@@ -83,6 +116,7 @@ func main() {
 	paymentRepo := payment.NewRepository(pool)
 	credRepo := providercredentials.NewRepository(pool, cfg.CredentialsEncryptionKey)
 	tenantRepo := tenant.NewRepository(pool)
+	backofficeRepo := backoffice.NewRepository(pool)
 
 	// Initialize services
 	planSvc := plan.NewService(planRepo)
@@ -90,23 +124,37 @@ func main() {
 	paySvc := payment.NewService(paymentRepo, adapter)
 	credSvc := providercredentials.NewService(credRepo, adapter)
 	tenantSvc := tenant.NewService(tenantRepo, cfg.AppEnv)
+	backofficeSvc := backoffice.NewService(backofficeRepo, cfg.BackofficeJWTSecret, cfg.BackofficeJWTTTL)
 
 	// Initialize handlers
 	planHandler := plan.NewHandler(planSvc)
 	subHandler := subscription.NewHandlerWithTenant(subSvc, tenantRepo)
 	paymentHandler := payment.NewHandler(paySvc, credSvc)
 	credHandler := providercredentials.NewHandler(credSvc)
-	tenantHandler := tenant.NewHandler(tenantSvc)
 	webhookHandler := webhook.NewHandler(paymentRepo, credSvc, adapter)
+	backofficeHandler := backoffice.NewHandler(backofficeSvc, tenantRepo, logger)
 
-	// Create router with public and protected routes
-	router := middleware.NewRouterWithPublicRoutes(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, cfg.AppVersion,
+	// Wrap backoffice service to match tenant handler interface
+	// This avoids import cycles between tenant and backoffice packages
+	backofficeAdapter := &backofficeServiceWrapper{svc: backofficeSvc}
+	tenantHandler := tenant.NewHandlerWithBackoffice(tenantSvc, backofficeAdapter)
+
+	// Create router with public, protected, and backoffice routes
+	router := middleware.NewRouterWithPublicRoutesAndBackoffice(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, cfg.AppVersion,
 		// Public routes (no auth required)
 		func(r chi.Router) {
 			tenantHandler.RegisterRoutes(r)
 			webhookHandler.RegisterRoutes(r)
+			backofficeHandler.RegisterPublicRoutes(r)
+
+			// Serve the backoffice UI (SPA with fallback to index.html)
+			uiHandler := serveUI()
+			r.Get("/backoffice", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/backoffice/", http.StatusMovedPermanently)
+			})
+			r.Get("/backoffice/*", uiHandler.ServeHTTP)
 		},
-		// Protected routes (auth required)
+		// Protected routes with API key auth
 		func(r chi.Router) {
 			credHandler.RegisterRoutes(r)
 			planHandler.RegisterRoutes(r)
@@ -114,6 +162,11 @@ func main() {
 			subHandler.RegisterRoutes(r)
 			tenantHandler.RegisterAuthRoutes(r)
 		},
+		// Protected backoffice routes with JWT auth
+		func(r chi.Router) {
+			backofficeHandler.RegisterAuthRoutes(r)
+		},
+		cfg.BackofficeJWTSecret,
 	)
 
 	// Create context for background tasks (poller, lifecycle jobs, etc.)
@@ -186,6 +239,68 @@ func main() {
 	}
 
 	logger.Info("server stopped")
+}
+
+func bootstrapTenant(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger) {
+	name := cfg.BootstrapTenantName
+	email := cfg.BootstrapTenantEmail
+	pass := cfg.BootstrapAdminPassword
+
+	// Only bootstrap if all three required vars are present
+	if name == "" && email == "" && pass == "" {
+		return // bootstrap not requested — silent return
+	}
+	if name == "" || email == "" || pass == "" {
+		logger.Warn("bootstrap skipped: BOOTSTRAP_TENANT_NAME, BOOTSTRAP_TENANT_EMAIL y BOOTSTRAP_ADMIN_PASSWORD deben estar todas configuradas")
+		return
+	}
+
+	logger.Info("bootstrap: creando tenant inicial", "name", name, "email", email)
+
+	// Create repositories
+	tenantRepo := tenant.NewRepository(pool)
+	backofficeRepo := backoffice.NewRepository(pool)
+
+	// Create services
+	tenantSvc := tenant.NewService(tenantRepo, cfg.AppEnv)
+	backofficeSvc := backoffice.NewService(backofficeRepo, cfg.BackofficeJWTSecret, cfg.BackofficeJWTTTL)
+
+	// Step 1: Create tenant (or get existing)
+	createdTenant, _, err := tenantSvc.Signup(ctx, tenant.SignupInput{
+		Name: name,
+		Email: email,
+		Slug: cfg.BootstrapTenantSlug,
+	})
+	if err != nil {
+		if errors.Is(err, apperrors.ErrConflict) || strings.Contains(err.Error(), "duplicate") {
+			logger.Info("bootstrap: tenant ya existe, usando el existente")
+			// Get existing tenant by email
+			existing, getErr := tenantRepo.GetByEmail(ctx, email)
+			if getErr != nil {
+				logger.Error("bootstrap: error obteniendo tenant existente", "error", getErr)
+				return
+			}
+			createdTenant = existing
+		} else {
+			logger.Error("bootstrap: error creando tenant", "error", err)
+			return
+		}
+	} else {
+		logger.Info("bootstrap: tenant creado", "id", createdTenant.ID, "slug", createdTenant.Slug)
+	}
+
+	// Step 2: Create admin user for backoffice
+	_, err = backofficeSvc.CreateUser(ctx, createdTenant.ID, email, name, pass, backoffice.RoleAdmin)
+	if err != nil {
+		if errors.Is(err, apperrors.ErrConflict) || strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "already exists") {
+			logger.Info("bootstrap: usuario admin ya existe, skipping")
+		} else {
+			logger.Error("bootstrap: error creando usuario admin", "error", err)
+		}
+		return
+	}
+
+	logger.Info("bootstrap: completado", "tenant_slug", createdTenant.Slug, "email", email)
 }
 
 func initLogger(level, appEnv string) *slog.Logger {

@@ -12,14 +12,29 @@ import (
 	"github.com/DelgadoElias/billax/internal/middleware"
 )
 
+// BackofficeService defines the interface for backoffice operations
+// This is kept minimal to avoid import cycles - all parameters use interface{}
+type BackofficeService interface {
+	CreateUser(ctx, tenantID interface{}, email, name, password string, role interface{}) (interface{}, error)
+}
+
 // Handler handles HTTP requests for tenant management
 type Handler struct {
-	svc *TenantService
+	svc               *TenantService
+	backofficeService BackofficeService
 }
 
 // NewHandler creates a new tenant handler
 func NewHandler(svc *TenantService) *Handler {
 	return &Handler{svc: svc}
+}
+
+// NewHandlerWithBackoffice creates a tenant handler with backoffice admin creation support
+func NewHandlerWithBackoffice(svc *TenantService, backofficeService BackofficeService) *Handler {
+	return &Handler{
+		svc:               svc,
+		backofficeService: backofficeService,
+	}
 }
 
 // Signup handles POST /v1/signup (public, no auth required)
@@ -39,6 +54,16 @@ func (h *Handler) Signup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httputil.RespondError(w, r, fmt.Errorf("signup error: %w", err))
 		return
+	}
+
+	// Create the admin backoffice user if backoffice service is available
+	if h.backofficeService != nil && input.Password != "" {
+		_, err := h.backofficeService.CreateUser(r.Context(), interface{}(tenant.ID), input.Email, input.Name, input.Password, "admin")
+		if err != nil {
+			// Log the error but don't fail the signup - the tenant is already created
+			// The admin user creation can be retried separately if needed
+			fmt.Printf("warning: failed to create admin user during signup: %v\n", err)
+		}
 	}
 
 	response := SignupResponse{

@@ -12,15 +12,22 @@ import (
 // registerPublicRoutes is a callback to mount public /v1 routes (no auth)
 // registerDomainRoutes is a callback to mount protected /v1 routes (with auth)
 func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, version string, registerDomainRoutes func(r chi.Router)) chi.Router {
-	return newRouter(logger, pool, rateLimitDefault, metricsEnabled, version, nil, registerDomainRoutes)
+	return newRouter(logger, pool, rateLimitDefault, metricsEnabled, version, nil, registerDomainRoutes, nil, "")
 }
 
 // NewRouterWithPublicRoutes creates a router with both public and protected routes
 func NewRouterWithPublicRoutes(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, version string, registerPublicRoutes, registerDomainRoutes func(r chi.Router)) chi.Router {
-	return newRouter(logger, pool, rateLimitDefault, metricsEnabled, version, registerPublicRoutes, registerDomainRoutes)
+	return NewRouterWithPublicRoutesAndBackoffice(logger, pool, rateLimitDefault, metricsEnabled, version, registerPublicRoutes, registerDomainRoutes, nil, "")
 }
 
-func newRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, version string, registerPublicRoutes, registerDomainRoutes func(r chi.Router)) chi.Router {
+// NewRouterWithPublicRoutesAndBackoffice creates a router with public, protected, and backoffice routes
+// backofficeJWTSecret is the secret for backoffice JWT authentication
+// registerBackofficeAuthRoutes is a callback to mount protected backoffice routes (with JWT auth)
+func NewRouterWithPublicRoutesAndBackoffice(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, version string, registerPublicRoutes, registerDomainRoutes, registerBackofficeAuthRoutes func(r chi.Router), backofficeJWTSecret string) chi.Router {
+	return newRouter(logger, pool, rateLimitDefault, metricsEnabled, version, registerPublicRoutes, registerDomainRoutes, registerBackofficeAuthRoutes, backofficeJWTSecret)
+}
+
+func newRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, version string, registerPublicRoutes, registerDomainRoutes, registerBackofficeAuthRoutes func(r chi.Router), backofficeJWTSecret string) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middlewares (apply to all routes)
@@ -51,7 +58,7 @@ func newRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, me
 			registerPublicRoutes(r)
 		}
 
-		// Protected routes under /v1 with auth
+		// Protected routes under /v1 with API key auth
 		// Create a new subrouter for authenticated endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(AuthMiddleware(pool))
@@ -68,6 +75,16 @@ func newRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, me
 				registerDomainRoutes(r)
 			}
 		})
+
+		// Backoffice protected routes with JWT auth (separate from API key auth)
+		if registerBackofficeAuthRoutes != nil && backofficeJWTSecret != "" {
+			r.Group(func(r chi.Router) {
+				r.Use(BackofficeAuth(pool, backofficeJWTSecret))
+
+				// Mount backoffice auth routes via callback
+				registerBackofficeAuthRoutes(r)
+			})
+		}
 	})
 
 	return r

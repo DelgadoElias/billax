@@ -35,6 +35,14 @@ services:
       PROVIDERS_CONFIG_PATH: providers.yml
       # Credential encryption (optional in dev, required in production)
       CREDENTIALS_ENCRYPTION_KEY: ""
+      # Backoffice authentication (JWT)
+      BACKOFFICE_JWT_SECRET: "dev-secret-key-change-in-production-12345"
+      BACKOFFICE_JWT_TTL: "24h"
+      # Bootstrap: auto-create first tenant on startup (all 3 required, leave empty to disable)
+      BOOTSTRAP_TENANT_NAME: ""
+      BOOTSTRAP_TENANT_EMAIL: ""
+      BOOTSTRAP_ADMIN_PASSWORD: ""
+      # BOOTSTRAP_TENANT_SLUG: ""  # optional, auto-generated from name if not provided
       # Subscription lifecycle job configuration
       LIFECYCLE_JOB_INTERVAL: "300s"
       PAST_DUE_GRACE_PERIOD_DAYS: "7"

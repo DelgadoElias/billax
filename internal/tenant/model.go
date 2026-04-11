@@ -41,9 +41,10 @@ type PlaintextKey struct {
 
 // SignupInput is the request body for POST /v1/signup
 type SignupInput struct {
-	Name  string `json:"name"`
-	Slug  string `json:"slug,omitempty"` // Auto-generated from name if empty
-	Email string `json:"email"`
+	Name     string `json:"name"`
+	Slug     string `json:"slug,omitempty"` // Auto-generated from name if empty
+	Email    string `json:"email"`
+	Password string `json:"password"` // Password for the admin backoffice user
 }
 
 // CreateKeyInput is the request body for POST /v1/keys

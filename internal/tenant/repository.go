@@ -17,6 +17,8 @@ type TenantRepo interface {
 	Create(ctx context.Context, t Tenant) (Tenant, error)
 	GetBySlug(ctx context.Context, slug string) (Tenant, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Tenant, error)
+	GetByEmail(ctx context.Context, email string) (Tenant, error)
+	GetByEmailAcrossAllTenants(ctx context.Context, email string) ([]Tenant, error)
 	UpdateDefaultProvider(ctx context.Context, tenantID uuid.UUID, providerName string) (Tenant, error)
 	CreateAPIKey(ctx context.Context, tenantID uuid.UUID, keyPrefix, keyHash string, input CreateKeyInput) (APIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uuid.UUID) ([]APIKey, error)
@@ -129,6 +131,73 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Tenant, error) 
 	}
 
 	return t, nil
+}
+
+// GetByEmail retrieves a tenant by email
+func (r *Repository) GetByEmail(ctx context.Context, email string) (Tenant, error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return Tenant{}, fmt.Errorf("acquiring connection: %w", err)
+	}
+	defer conn.Release()
+
+	var t Tenant
+	err = conn.QueryRow(ctx,
+		`SELECT id, name, slug, email, is_active, default_provider_name, created_at, updated_at
+		 FROM tenants WHERE email = $1`,
+		email,
+	).Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.DefaultProviderName, &t.CreatedAt, &t.UpdatedAt)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Tenant{}, domerrors.ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("getting tenant by email: %w", err)
+	}
+
+	return t, nil
+}
+
+// GetByEmailAcrossAllTenants retrieves all tenants that have a backoffice user with the given email
+// This is used for the backoffice login to find which tenants have this email
+func (r *Repository) GetByEmailAcrossAllTenants(ctx context.Context, email string) ([]Tenant, error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquiring connection: %w", err)
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(ctx,
+		`SELECT DISTINCT t.id, t.name, t.slug, t.email, t.is_active, t.default_provider_name, t.created_at, t.updated_at
+		 FROM tenants t
+		 INNER JOIN backoffice_users bu ON t.id = bu.tenant_id
+		 WHERE bu.email = $1 AND bu.is_active = true AND t.is_active = true
+		 ORDER BY t.name`,
+		email,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying tenants by email: %w", err)
+	}
+	defer rows.Close()
+
+	var tenants []Tenant
+	for rows.Next() {
+		var t Tenant
+		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.DefaultProviderName, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning tenant: %w", err)
+		}
+		tenants = append(tenants, t)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	if len(tenants) == 0 {
+		return nil, domerrors.ErrNotFound
+	}
+
+	return tenants, nil
 }
 
 // UpdateDefaultProvider updates the default provider for a tenant and returns the updated tenant

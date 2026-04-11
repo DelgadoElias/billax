@@ -1,0 +1,1 @@
+-- Downgrade migration (intentionally minimal - handle manually)
