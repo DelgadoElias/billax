@@ -48,6 +48,8 @@ Docker Compose in one command. No proprietary cloud services. PostgreSQL is your
 
 ## Quick start
 
+**New to billax?** Start with [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for a complete end-to-end walkthrough (create plan → subscription → payment).
+
 ### Deploy to Railway (one-click)
 
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new?templateId=https://github.com/DelgadoElias/billax)
@@ -65,10 +67,11 @@ cd billax
 # Start the full stack: app, database, Prometheus, Grafana
 docker-compose --profile observability up -d
 
-# Apply migrations
+# Apply migrations (in order)
 docker exec payd_db psql -U payd_app -d payd < migrations/001_init.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/002_plan_slug_subscription_tags.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/003_planless_subscriptions.sql
+docker exec payd_db psql -U payd_app -d payd < migrations/005_subscription_idempotency.sql
 
 # Configure environment (optional in dev)
 cp .env.example .env
@@ -243,6 +246,48 @@ Idempotency-Key: <uuid>
 GET /v1/payments?provider=mercadopago
 ```
 
+### Idempotency in practice
+
+The `Idempotency-Key` header ensures that duplicate requests return the same response:
+
+```bash
+# First request with key "charge-001"
+curl -X POST http://localhost:8080/v1/subscriptions/abc123/payments \
+  -H "Authorization: Bearer $KEY" \
+  -H "Idempotency-Key: charge-001" \
+  -H "Content-Type: application/json" \
+  -d '{"provider_name": "mercadopago", "amount": 299900}'
+# Response: HTTP 201 Created
+# {
+#   "id": "pay_01j...",
+#   "status": "pending",
+#   ...
+# }
+
+# Same request, same key
+curl -X POST http://localhost:8080/v1/subscriptions/abc123/payments \
+  -H "Authorization: Bearer $KEY" \
+  -H "Idempotency-Key: charge-001" \
+  -H "Content-Type: application/json" \
+  -d '{"provider_name": "mercadopago", "amount": 299900}'
+# Response: HTTP 200 OK (identical response, no duplicate charge)
+# {
+#   "id": "pay_01j...",
+#   "status": "pending",
+#   ...
+# }
+
+# This also applies to subscriptions: same Idempotency-Key = same subscription
+curl -X POST http://localhost:8080/v1/subscriptions \
+  -H "Authorization: Bearer $KEY" \
+  -H "Idempotency-Key: sub-enterprise-001" \
+  -H "Content-Type: application/json" \
+  -d '{"plan_slug": "pro-monthly", "external_customer_id": "acme"}'
+# 201 Created on first call, 200 OK on retry
+```
+
+Safe to retry forever — billax guarantees the same result.
+
 ---
 
 ## Provider connectors
@@ -278,6 +323,46 @@ billax ships with connectors for:
 - [x] Mercado Pago (production-ready)
 - [ ] Helipagos (planned)
 - [ ] Stripe (planned)
+
+### Mercado Pago setup
+
+To use Mercado Pago as a payment provider, you need an **access token** and **webhook secret** from your Mercado Pago account.
+
+1. **Get credentials from Mercado Pago**:
+   - Log in to [Mercado Pago Developer](https://www.mercadopago.com/developers)
+   - Navigate to "Your integrations" → "Production"
+   - Copy your **Access Token** and **Webhook Secret**
+
+2. **Store credentials via API**:
+   ```bash
+   curl -X POST http://localhost:8080/v1/provider-credentials/mercadopago \
+     -H "Authorization: Bearer $KEY" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "access_token": "APP_USR-...",
+       "webhook_secret": "..."
+     }'
+   # 200 OK
+   ```
+
+3. **Create a payment**:
+   ```bash
+   # Credentials are automatically retrieved from the database
+   curl -X POST http://localhost:8080/v1/subscriptions/{key}/payments \
+     -H "Authorization: Bearer $KEY" \
+     -H "Idempotency-Key: charge-001" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "provider_name": "mercadopago",
+       "amount": 299900,
+       "currency": "ARS"
+     }'
+   # Routes through Mercado Pago, idempotent by Idempotency-Key
+   ```
+
+4. **Enable webhooks** (for settlement notifications):
+   - In Mercado Pago Developer, set your webhook URL to: `https://<your-domain>/webhooks/mercadopago`
+   - billax validates the webhook signature automatically
 
 Writing your own connector: implement the six-method interface, add an entry to `providers.yml`, register at startup. That's it.
 
@@ -358,6 +443,24 @@ This brings up:
 - `payd_active_subscriptions` — current subscription count by status (updated every 30 seconds)
 
 For details on interpreting the dashboard, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+---
+
+## Testing
+
+billax includes unit tests, integration tests, and a comprehensive testing guide.
+
+**Run unit tests:**
+```bash
+go test ./...
+```
+
+**Run integration tests:**
+```bash
+go test -tags=integration ./...
+```
+
+**Manual API testing:** See [docs/TESTING.md](docs/TESTING.md) for detailed examples of every endpoint with curl commands, expected responses, and troubleshooting tips.
 
 ---
 
