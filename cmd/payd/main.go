@@ -25,6 +25,7 @@ import (
 	"github.com/DelgadoElias/billax/internal/provider/mercadopago"
 	"github.com/DelgadoElias/billax/internal/providercredentials"
 	"github.com/DelgadoElias/billax/internal/subscription"
+	"github.com/DelgadoElias/billax/internal/tenant"
 )
 
 func main() {
@@ -67,26 +68,37 @@ func main() {
 	subRepo := subscription.NewRepository(pool)
 	paymentRepo := payment.NewRepository(pool)
 	credRepo := providercredentials.NewRepository(pool)
+	tenantRepo := tenant.NewRepository(pool)
 
 	// Initialize services
 	planSvc := plan.NewService(planRepo)
 	subSvc := subscription.NewService(subRepo, planRepo, paymentRepo, adapter)
 	paySvc := payment.NewService(paymentRepo, adapter)
 	credSvc := providercredentials.NewService(credRepo, adapter)
+	tenantSvc := tenant.NewService(tenantRepo, cfg.AppEnv)
 
 	// Initialize handlers
 	planHandler := plan.NewHandler(planSvc)
 	subHandler := subscription.NewHandler(subSvc)
-	paymentHandler := payment.NewHandler(paySvc)
+	paymentHandler := payment.NewHandler(paySvc, credSvc)
 	credHandler := providercredentials.NewHandler(credSvc)
+	tenantHandler := tenant.NewHandler(tenantSvc)
 
-	// Create router with domain routes registration callback
-	router := middleware.NewRouter(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, func(r chi.Router) {
-		credHandler.RegisterRoutes(r)
-		planHandler.RegisterRoutes(r)
-		subHandler.RegisterRoutes(r)
-		paymentHandler.RegisterRoutes(r)
-	})
+	// Create router with public and protected routes
+	router := middleware.NewRouterWithPublicRoutes(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled,
+		// Public routes (no auth required)
+		func(r chi.Router) {
+			tenantHandler.RegisterRoutes(r)
+		},
+		// Protected routes (auth required)
+		func(r chi.Router) {
+			credHandler.RegisterRoutes(r)
+			planHandler.RegisterRoutes(r)
+			paymentHandler.RegisterRoutes(r)
+			subHandler.RegisterRoutes(r)
+			tenantHandler.RegisterAuthRoutes(r)
+		},
+	)
 
 	// Create context for background tasks (poller, etc.)
 	// This will be cancelled during graceful shutdown

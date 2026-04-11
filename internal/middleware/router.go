@@ -9,8 +9,18 @@ import (
 )
 
 // NewRouter creates a new chi router with all middlewares
-// registerDomainRoutes is a callback to mount domain-specific routes on the /v1 group
+// registerPublicRoutes is a callback to mount public /v1 routes (no auth)
+// registerDomainRoutes is a callback to mount protected /v1 routes (with auth)
 func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, registerDomainRoutes func(r chi.Router)) chi.Router {
+	return newRouter(logger, pool, rateLimitDefault, metricsEnabled, nil, registerDomainRoutes)
+}
+
+// NewRouterWithPublicRoutes creates a router with both public and protected routes
+func NewRouterWithPublicRoutes(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, registerPublicRoutes, registerDomainRoutes func(r chi.Router)) chi.Router {
+	return newRouter(logger, pool, rateLimitDefault, metricsEnabled, registerPublicRoutes, registerDomainRoutes)
+}
+
+func newRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, metricsEnabled bool, registerPublicRoutes, registerDomainRoutes func(r chi.Router)) chi.Router {
 	r := chi.NewRouter()
 
 	// Global middlewares (apply to all routes)
@@ -28,24 +38,36 @@ func NewRouter(logger *slog.Logger, pool *pgxpool.Pool, rateLimitDefault int, me
 		w.Write([]byte(`{"status":"ok","version":"0.1.0"}`))
 	})
 
-	// Protected routes under /v1
+	// Setup rate limiter (shared across all /v1 routes)
+	rateLimiter := NewRateLimiter(rateLimitDefault)
+
+	// All /v1 routes under one group
 	r.Route("/v1", func(r chi.Router) {
-		// Auth and rate limiting middlewares
-		r.Use(AuthMiddleware(pool))
-		rateLimiter := NewRateLimiter(rateLimitDefault)
+		// Rate limiting for all /v1 routes
 		r.Use(RateLimitMiddleware(rateLimiter))
 
-		// Test endpoint
-		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-			tenantID := TenantIDFromContext(r.Context())
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"tenant_id":"` + tenantID.String() + `"}`))
-		})
-
-		// Mount domain routes via callback
-		if registerDomainRoutes != nil {
-			registerDomainRoutes(r)
+		// Public routes first (no auth)
+		if registerPublicRoutes != nil {
+			registerPublicRoutes(r)
 		}
+
+		// Protected routes under /v1 with auth
+		// Create a new subrouter for authenticated endpoints
+		r.Group(func(r chi.Router) {
+			r.Use(AuthMiddleware(pool))
+
+			// Test endpoint
+			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+				tenantID := TenantIDFromContext(r.Context())
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"tenant_id":"` + tenantID.String() + `"}`))
+			})
+
+			// Mount domain routes via callback (for authenticated endpoints)
+			if registerDomainRoutes != nil {
+				registerDomainRoutes(r)
+			}
+		})
 	})
 
 	return r

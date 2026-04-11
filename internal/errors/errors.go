@@ -22,6 +22,9 @@ var (
 	ErrPlansNotSupported     = errors.New("provider does not support plan-based billing")
 	ErrProviderRequired      = errors.New("a provider must be set to update amount")
 	ErrNotSupported          = errors.New("operation not supported by this provider")
+	ErrDuplicateTenantSlug   = errors.New("a tenant with this slug already exists")
+	ErrDuplicateEmail        = errors.New("this email is already registered")
+	ErrKeyNotFound           = errors.New("api key not found")
 )
 
 // DomainError carries HTTP-level context for the handler layer
@@ -37,10 +40,15 @@ func (e *DomainError) Unwrap() error { return e.Cause }
 
 // HTTPStatusFor maps a sentinel error to an HTTP status code
 func HTTPStatusFor(err error) int {
+	// Check DomainError first for custom HTTP status
+	if de, ok := err.(*DomainError); ok {
+		return de.HTTPStatus
+	}
+
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrKeyNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, ErrConflict), errors.Is(err, ErrDuplicatePlan), errors.Is(err, ErrDuplicateIdempotency):
+	case errors.Is(err, ErrConflict), errors.Is(err, ErrDuplicatePlan), errors.Is(err, ErrDuplicateIdempotency), errors.Is(err, ErrDuplicateTenantSlug), errors.Is(err, ErrDuplicateEmail):
 		return http.StatusConflict
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrMissingIdempotencyKey):
 		return http.StatusBadRequest
@@ -61,11 +69,16 @@ func HTTPStatusFor(err error) int {
 
 // CodeFor maps a sentinel error to a machine-readable string code
 func CodeFor(err error) string {
+	// Check DomainError first for custom code
+	if de, ok := err.(*DomainError); ok {
+		return de.Code
+	}
+
 	switch {
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrKeyNotFound):
 		return "not_found"
-	case errors.Is(err, ErrDuplicatePlan):
-		return "duplicate_plan"
+	case errors.Is(err, ErrDuplicatePlan), errors.Is(err, ErrDuplicateTenantSlug), errors.Is(err, ErrDuplicateEmail):
+		return "duplicate"
 	case errors.Is(err, ErrPlanNotActive):
 		return "plan_not_active"
 	case errors.Is(err, ErrSubscriptionExpired):
