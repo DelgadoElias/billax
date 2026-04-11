@@ -43,7 +43,14 @@ func main() {
 	cfg.AppVersion = version
 
 	// Initialize logger
-	logger := initLogger(cfg.LogLevel)
+	logger := initLogger(cfg.LogLevel, cfg.AppEnv)
+
+	// Run database migrations
+	if err := db.RunMigrations(cfg.DatabaseURL, cfg.MigrationsPath); err != nil {
+		logger.Error("migration failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("migrations applied successfully")
 
 	// Create database connection pool
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -174,7 +181,7 @@ func main() {
 	logger.Info("server stopped")
 }
 
-func initLogger(level string) *slog.Logger {
+func initLogger(level, appEnv string) *slog.Logger {
 	var logLevel slog.Level
 	switch level {
 	case "debug":
@@ -187,9 +194,18 @@ func initLogger(level string) *slog.Logger {
 		logLevel = slog.LevelInfo
 	}
 
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: logLevel,
-	}))
+	opts := &slog.HandlerOptions{Level: logLevel}
+
+	// Use JSON logging in production for log aggregators (ELK, Datadog, etc.)
+	// Use text logging in development for human readability
+	var handler slog.Handler
+	if appEnv == "production" {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
+	return slog.New(handler)
 }
 
 // startSubscriptionMetricsPoller polls the database for subscription counts

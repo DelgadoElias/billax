@@ -22,6 +22,7 @@ type Config struct {
 	WebhookDeliveryTimeout time.Duration
 	WebhookMaxRetries      int
 	ProvidersConfigPath    string // path to providers.yml
+	MigrationsPath         string // path to migrations directory
 	MetricsEnabled         bool
 	MetricsPort            int
 }
@@ -42,6 +43,7 @@ func Load() (*Config, error) {
 		WebhookDeliveryTimeout: getEnvDuration("WEBHOOK_DELIVERY_TIMEOUT", 10*time.Second),
 		WebhookMaxRetries:   getEnvInt("WEBHOOK_MAX_RETRIES", 5),
 		ProvidersConfigPath: getEnv("PROVIDERS_CONFIG_PATH", "providers.yml"),
+		MigrationsPath:      getEnv("MIGRATIONS_PATH", "migrations"),
 		MetricsEnabled:      getEnvBool("METRICS_ENABLED", true),
 		MetricsPort:         getEnvInt("METRICS_PORT", 9090),
 	}

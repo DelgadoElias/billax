@@ -61,6 +61,8 @@ type CreateSubscriptionInput struct {
 	ProviderSubscriptionID string          `json:"provider_subscription_id"`
 	Tags                   []string        `json:"tags"`
 	Metadata               json.RawMessage `json:"metadata"`
+	// Idempotency (set by handler from Idempotency-Key header, not from request body)
+	IdempotencyKey string `json:"-"`
 }
 
 // UpdateSubscriptionInput for PATCH

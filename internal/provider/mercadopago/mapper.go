@@ -60,7 +60,7 @@ func buildCreatePaymentRequest(req provider.ChargeRequest) mpCreatePaymentReques
 		TransactionAmount: centavosToUnits(req.Amount), // Convert centavos to primary currency unit
 		Description:       req.Description,
 		ExternalReference: req.IdempotencyKey, // Used for idempotency and reconciliation
-		PayerEmail:        req.ExternalCustomerID, // MP requires payer email; we use ExternalCustomerID as email
+		Payer:             mpPayer{Email: req.ExternalCustomerID}, // MP requires payer as nested object
 		Metadata:          req.Metadata,
 	}
 }

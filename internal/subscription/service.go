@@ -38,11 +38,12 @@ func NewService(repo SubscriptionRepo, planRepo plan.PlanRepo, paymentRepo payme
 }
 
 // Create creates a new subscription (plan-based or planless)
-func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscriptionInput) (Subscription, error) {
+// Returns (subscription, created, error) where created=true if a new subscription was created
+func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscriptionInput) (Subscription, bool, error) {
 	// Extract tenant ID from context
 	tenantID := middleware.TenantIDFromContext(ctx)
 	if tenantID == uuid.Nil {
-		return Subscription{}, errors.ErrMissingTenantID
+		return Subscription{}, false, errors.ErrMissingTenantID
 	}
 
 	periodStart := time.Now()
@@ -60,18 +61,18 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 	if input.PlanSlug != "" {
 		planObj, err := s.planRepo.GetBySlug(ctx, tenantID, input.PlanSlug)
 		if err != nil {
-			return Subscription{}, fmt.Errorf("resolving plan: %w", err)
+			return Subscription{}, false, fmt.Errorf("resolving plan: %w", err)
 		}
 
 		if !planObj.IsActive {
-			return Subscription{}, errors.ErrPlanNotActive
+			return Subscription{}, false, errors.ErrPlanNotActive
 		}
 
 		// Check provider capability for plan-based billing if provider is specified
 		if input.ProviderName != "" {
 			caps := s.adapter.GetCapabilities(input.ProviderName)
 			if !caps.Plans {
-				return Subscription{}, errors.ErrPlansNotSupported
+				return Subscription{}, false, errors.ErrPlansNotSupported
 			}
 		}
 
@@ -102,7 +103,7 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 		v.Add(validation.MinInt("interval_count", int64(input.IntervalCount), 1))
 
 		if err := v.Err(); err != nil {
-			return Subscription{}, err
+			return Subscription{}, false, err
 		}
 
 		amount = input.Amount
@@ -117,13 +118,13 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 		if fe := validation.MaxLength("external_customer_id", input.ExternalCustomerID, 255); fe != nil {
 			v := &validation.ValidationError{}
 			v.Add(fe)
-			return Subscription{}, v.Err()
+			return Subscription{}, false, v.Err()
 		}
 	}
 
 	// Validate tags before creating
 	if err := s.validateTags(input.Tags); err != nil {
-		return Subscription{}, err
+		return Subscription{}, false, err
 	}
 
 	// Calculate period end
@@ -150,12 +151,12 @@ func (s *SubscriptionService) Create(ctx context.Context, input CreateSubscripti
 		Metadata:               input.Metadata,
 	}
 
-	createdSub, err := s.repo.Create(ctx, sub)
+	result, err := s.repo.Create(ctx, sub, input.IdempotencyKey)
 	if err != nil {
-		return Subscription{}, fmt.Errorf("creating subscription: %w", err)
+		return Subscription{}, false, fmt.Errorf("creating subscription: %w", err)
 	}
 
-	return createdSub, nil
+	return result.Subscription, result.Created, nil
 }
 
 // GetByKey retrieves a subscription by its external key with enriched payment history

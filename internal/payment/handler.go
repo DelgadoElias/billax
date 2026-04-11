@@ -9,23 +9,24 @@ import (
 
 	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/httputil"
+	"github.com/DelgadoElias/billax/internal/middleware"
+	"github.com/DelgadoElias/billax/internal/providercredentials"
 )
 
 type Handler struct {
-	svc *PaymentService
+	svc     *PaymentService
+	credSvc *providercredentials.CredentialsService
 }
 
-func NewHandler(svc *PaymentService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *PaymentService, credSvc *providercredentials.CredentialsService) *Handler {
+	return &Handler{svc: svc, credSvc: credSvc}
 }
 
 // RegisterRoutes mounts payment routes onto a chi sub-router
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/payments", h.List)
-	r.Route("/subscriptions/{subscriptionKey}", func(r chi.Router) {
-		r.Post("/payments", h.CreatePayment)
-		r.Get("/payments", h.ListBySubscription)
-	})
+	r.Post("/subscriptions/{subscriptionKey}/payments", h.CreatePayment)
+	r.Get("/subscriptions/{subscriptionKey}/payments", h.ListBySubscription)
 }
 
 // CreatePayment creates a new payment (idempotent via Idempotency-Key header)
@@ -44,6 +45,32 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input.IdempotencyKey = idempotencyKey
+
+	// Fetch stored provider credentials from database
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	if tenantID == uuid.Nil {
+		httputil.RespondError(w, r, errors.ErrMissingTenantID)
+		return
+	}
+
+	// If provider_name is provided, fetch stored credentials
+	if input.ProviderName != "" {
+		storedConfig, err := h.credSvc.GetProviderConfig(r.Context(), tenantID, input.ProviderName)
+		if err != nil {
+			httputil.RespondError(w, r, err)
+			return
+		}
+		// Merge stored credentials with any request-provided config (request takes precedence)
+		if input.ProviderConfig == nil {
+			input.ProviderConfig = storedConfig
+		} else {
+			for k, v := range storedConfig {
+				if _, exists := input.ProviderConfig[k]; !exists {
+					input.ProviderConfig[k] = v
+				}
+			}
+		}
+	}
 
 	payment, created, err := h.svc.CreatePayment(r.Context(), input)
 	if err != nil {

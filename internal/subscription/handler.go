@@ -33,7 +33,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 // Create creates a new subscription
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	// Check for Idempotency-Key header
-	if r.Header.Get("Idempotency-Key") == "" {
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	if idempotencyKey == "" {
 		httputil.RespondError(w, r, errors.ErrMissingIdempotencyKey)
 		return
 	}
@@ -44,13 +45,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sub, err := h.svc.Create(r.Context(), input)
+	// Set the idempotency key from header
+	input.IdempotencyKey = idempotencyKey
+
+	sub, created, err := h.svc.Create(r.Context(), input)
 	if err != nil {
 		httputil.RespondError(w, r, err)
 		return
 	}
 
-	httputil.RespondCreated(w, r, sub)
+	if created {
+		httputil.RespondCreated(w, r, sub)
+	} else {
+		httputil.RespondOK(w, sub)
+	}
 }
 
 // List returns a paginated list of subscriptions

@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -121,13 +122,9 @@ func setRLSContext(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID) 
 	return err
 }
 
-// hashToString converts a hash byte slice to a hex string
+// hashToString converts a hash byte slice to a base64 string
 func hashToString(hash []byte) string {
-	var result string
-	for _, b := range hash {
-		result += string(rune(b))
-	}
-	return result
+	return base64.StdEncoding.EncodeToString(hash)
 }
 
 // writeErrorResponse writes a standard error response

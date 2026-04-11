@@ -15,9 +15,15 @@ import (
 	apperrors "github.com/DelgadoElias/billax/internal/errors"
 )
 
+// CreateResult wraps a subscription creation result with idempotency info
+type CreateResult struct {
+	Subscription Subscription
+	Created      bool // true if newly created, false if retrieved from duplicate idempotency key
+}
+
 // SubscriptionRepo is the interface the service depends on
 type SubscriptionRepo interface {
-	Create(ctx context.Context, sub Subscription) (Subscription, error)
+	Create(ctx context.Context, sub Subscription, idempotencyKey string) (CreateResult, error)
 	GetByKey(ctx context.Context, key uuid.UUID) (Subscription, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Subscription, error)
 	Update(ctx context.Context, id uuid.UUID, input UpdateSubscriptionInput) (Subscription, error)
@@ -58,19 +64,24 @@ func scanSubscription(row pgx.Row) (Subscription, error) {
 	return sub, nil
 }
 
-// Create creates a new subscription
-func (r *postgresRepository) Create(ctx context.Context, sub Subscription) (Subscription, error) {
-	metadataJSON, _ := json.Marshal(sub.Metadata)
+// Create creates a new subscription with idempotency support
+// If idempotency_key matches an existing subscription for this tenant, returns the existing subscription
+func (r *postgresRepository) Create(ctx context.Context, sub Subscription, idempotencyKey string) (CreateResult, error) {
+	// Pass metadata directly — if nil/empty, PostgreSQL will store NULL
+	var metadataToInsert interface{}
+	if sub.Metadata != nil && len(sub.Metadata) > 0 && string(sub.Metadata) != "null" {
+		metadataToInsert = sub.Metadata
+	}
 
 	var createdSub Subscription
 	var metadataResult json.RawMessage
 
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO subscriptions (tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now(), now())
+		`INSERT INTO subscriptions (tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, idempotency_key, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, now(), now())
 		 RETURNING id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at`,
 		sub.TenantID, sub.PlanID, sub.Amount, sub.Currency, sub.Interval, sub.IntervalCount, sub.SubscriptionKey, sub.ExternalCustomerID, sub.Status, sub.ProviderName, sub.ProviderSubscriptionID,
-		sub.CurrentPeriodStart, sub.CurrentPeriodEnd, sub.TrialEndsAt, sub.CanceledAt, sub.CancelAtPeriodEnd, sub.Tags, metadataJSON,
+		sub.CurrentPeriodStart, sub.CurrentPeriodEnd, sub.TrialEndsAt, sub.CanceledAt, sub.CancelAtPeriodEnd, sub.Tags, metadataToInsert, idempotencyKey,
 	).Scan(
 		&createdSub.ID, &createdSub.TenantID, &createdSub.PlanID, &createdSub.Amount, &createdSub.Currency, &createdSub.Interval, &createdSub.IntervalCount,
 		&createdSub.SubscriptionKey, &createdSub.ExternalCustomerID,
@@ -80,14 +91,37 @@ func (r *postgresRepository) Create(ctx context.Context, sub Subscription) (Subs
 	)
 
 	if err != nil {
-		return Subscription{}, fmt.Errorf("create subscription: %w", err)
+		// Check if it's a unique constraint violation on idempotency key
+		if strings.Contains(err.Error(), "subscriptions_tenant_idempotency_key_key") {
+			// Idempotency key conflict: fetch the existing subscription
+			err2 := r.pool.QueryRow(ctx,
+				`SELECT id, tenant_id, plan_id, amount, currency, interval, interval_count, subscription_key, external_customer_id, status, provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at, canceled_at, cancel_at_period_end, tags, metadata, created_at, updated_at
+				 FROM subscriptions
+				 WHERE tenant_id = $1 AND idempotency_key = $2`,
+				sub.TenantID, idempotencyKey,
+			).Scan(
+				&createdSub.ID, &createdSub.TenantID, &createdSub.PlanID, &createdSub.Amount, &createdSub.Currency, &createdSub.Interval, &createdSub.IntervalCount,
+				&createdSub.SubscriptionKey, &createdSub.ExternalCustomerID,
+				&createdSub.Status, &createdSub.ProviderName, &createdSub.ProviderSubscriptionID,
+				&createdSub.CurrentPeriodStart, &createdSub.CurrentPeriodEnd, &createdSub.TrialEndsAt, &createdSub.CanceledAt,
+				&createdSub.CancelAtPeriodEnd, &createdSub.Tags, &metadataResult, &createdSub.CreatedAt, &createdSub.UpdatedAt,
+			)
+			if err2 != nil {
+				return CreateResult{}, fmt.Errorf("fetching duplicate subscription: %w", err2)
+			}
+			if len(metadataResult) > 0 && string(metadataResult) != "null" {
+				createdSub.Metadata = metadataResult
+			}
+			return CreateResult{Subscription: createdSub, Created: false}, nil
+		}
+		return CreateResult{}, fmt.Errorf("create subscription: %w", err)
 	}
 
-	if len(metadataResult) > 0 {
+	if len(metadataResult) > 0 && string(metadataResult) != "null" {
 		createdSub.Metadata = metadataResult
 	}
 
-	return createdSub, nil
+	return CreateResult{Subscription: createdSub, Created: true}, nil
 }
 
 // GetByKey retrieves a subscription by its stable external key

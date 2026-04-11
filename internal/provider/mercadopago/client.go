@@ -36,11 +36,16 @@ func newClientWithBaseURL(baseURL string) *Client {
 
 // --- Mercado Pago wire types (internal) ---
 
+// mpPayer contains payer information for Mercado Pago
+type mpPayer struct {
+	Email string `json:"email"`
+}
+
 // mpCreatePaymentRequest is the body sent to POST /v1/payments
 type mpCreatePaymentRequest struct {
 	TransactionAmount float64            `json:"transaction_amount"`
 	Description       string             `json:"description,omitempty"`
-	PayerEmail        string             `json:"payer_email,omitempty"`
+	Payer             mpPayer            `json:"payer"`
 	ExternalReference string             `json:"external_reference,omitempty"`
 	Metadata          map[string]string  `json:"metadata,omitempty"`
 }
