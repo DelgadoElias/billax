@@ -24,11 +24,13 @@ cd billax
 # Start app, database, Prometheus, Grafana
 docker-compose --profile observability up -d
 
-# Apply migrations
+# Apply migrations (in order)
 docker exec payd_db psql -U payd_app -d payd < migrations/001_init.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/002_plan_slug_subscription_tags.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/003_planless_subscriptions.sql
+docker exec payd_db psql -U payd_app -d payd < migrations/004_provider_credentials.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/005_subscription_idempotency.sql
+docker exec payd_db psql -U payd_app -d payd < migrations/006_tenant_email.sql
 
 # Verify app is running
 curl http://localhost:8080/health
@@ -43,21 +45,54 @@ curl http://localhost:8080/health
 
 ---
 
-## 2. Get your test API key
+## 2. Create your account and get an API key
 
-billax comes with a pre-seeded test tenant and API key for development.
+Sign up a new tenant to get your first API key:
 
 ```bash
-# From the Docker logs or environment
-export API_KEY="payd_test_pF+3gggDxi4kpvzqKofHD2C9IJuGdy"
 export BASE_URL="http://localhost:8080"
+
+curl -s -X POST $BASE_URL/v1/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Company",
+    "email": "admin@mycompany.com"
+  }'
+```
+
+Response (HTTP 201):
+```json
+{
+  "tenant": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "My Company",
+    "slug": "my-company",
+    "email": "admin@mycompany.com",
+    "is_active": true,
+    "created_at": "2026-04-11T12:36:41Z"
+  },
+  "api_key": {
+    "id": "74811871-6350-4c82-aefb-916a495d89c2",
+    "key": "payd_test_pc6uiKhGIKgLT8oflp8gheH8RPyF9i2B0-HDZA9MbaI=",
+    "key_prefix": "payd_test_pc",
+    "scopes": ["read", "write"],
+    "created_at": "2026-04-11T12:36:41Z"
+  },
+  "warning": "Store this key securely. It will not be shown again."
+}
+```
+
+Save your API key:
+
+```bash
+export API_KEY="payd_test_pc6uiKhGIKgLT8oflp8gheH8RPyF9i2B0-HDZA9MbaI="
 ```
 
 Test the key:
 
 ```bash
 curl -s -H "Authorization: Bearer $API_KEY" $BASE_URL/v1/me
-# {"tenant_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"}
+# {"tenant_id": "550e8400-e29b-41d4-a716-446655440000"}
 ```
 
 ---

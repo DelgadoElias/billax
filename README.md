@@ -71,7 +71,9 @@ docker-compose --profile observability up -d
 docker exec payd_db psql -U payd_app -d payd < migrations/001_init.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/002_plan_slug_subscription_tags.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/003_planless_subscriptions.sql
+docker exec payd_db psql -U payd_app -d payd < migrations/004_provider_credentials.sql
 docker exec payd_db psql -U payd_app -d payd < migrations/005_subscription_idempotency.sql
+docker exec payd_db psql -U payd_app -d payd < migrations/006_tenant_email.sql
 
 # Configure environment (optional in dev)
 cp .env.example .env
@@ -86,6 +88,52 @@ Health check:
 curl http://localhost:8080/health
 # {"status":"ok","version":"0.1.0"}
 ```
+
+### Create your account
+
+Sign up a new tenant and get your first API key:
+
+```bash
+curl -X POST http://localhost:8080/v1/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "ACME Corporation",
+    "email": "admin@acme.com"
+  }'
+
+# Response: HTTP 201
+# {
+#   "tenant": {
+#     "id": "550e8400-e29b-41d4-a716-446655440000",
+#     "name": "ACME Corporation",
+#     "slug": "acme-corporation",
+#     "email": "admin@acme.com",
+#     "created_at": "2026-04-11T12:36:41Z"
+#   },
+#   "api_key": {
+#     "key": "payd_test_pc6uiKhGIKgLT8oflp8gheH8RPyF9i2B0-HDZA9MbaI=",
+#     "id": "74811871-6350-4c82-aefb-916a495d89c2",
+#     "key_prefix": "payd_test_pc",
+#     "scopes": ["read", "write"],
+#     "created_at": "2026-04-11T12:36:41Z"
+#   },
+#   "warning": "Store this key securely. It will not be shown again."
+# }
+```
+
+Save your API key:
+```bash
+export API_KEY="payd_test_pc6uiKhGIKgLT8oflp8gheH8RPyF9i2B0-HDZA9MbaI="
+```
+
+Test it works:
+```bash
+curl http://localhost:8080/v1/me \
+  -H "Authorization: Bearer $API_KEY"
+# {"tenant_id":"550e8400-e29b-41d4-a716-446655440000"}
+```
+
+**Important:** The plaintext key is shown only once. Store it securely. If you lose it, create a new one with `POST /v1/keys`.
 
 ### Running without observability
 
@@ -245,6 +293,57 @@ Idempotency-Key: <uuid>
 # All payments for tenant (cross-subscription)
 GET /v1/payments?provider=mercadopago
 ```
+
+### API Keys
+
+Manage your API keys for tenant authentication:
+
+```bash
+# Create an additional API key (authenticated)
+POST /v1/keys
+{
+  "description": "CI/CD pipeline",
+  "expires_at": "2027-04-11T00:00:00Z"  # optional
+}
+# Response: HTTP 201
+# {
+#   "key": "payd_test_YnK--J3IVMsSbFWB2vBkb_vjP2xlQgqzOoVxwB5qD8Y=",
+#   "id": "fbe78890-2b5a-49a1-b14f-38ef9b450b51",
+#   "key_prefix": "payd_test_Yn",
+#   "description": "CI/CD pipeline",
+#   "created_at": "2026-04-11T12:37:05Z"
+# }
+
+# List all API keys (metadata only, no hashes)
+GET /v1/keys
+# Response: HTTP 200
+# {
+#   "keys": [
+#     {
+#       "id": "fbe78890-2b5a-49a1-b14f-38ef9b450b51",
+#       "key_prefix": "payd_test_Yn",
+#       "description": "CI/CD pipeline",
+#       "expires_at": "2027-04-11T00:00:00Z",
+#       "is_active": true,
+#       "created_at": "2026-04-11T12:37:05Z"
+#     },
+#     {
+#       "id": "2723bc03-729c-4250-9ec9-67500f72c585",
+#       "key_prefix": "payd_test_pc",
+#       "description": "Initial key",
+#       "expires_at": null,
+#       "is_active": true,
+#       "created_at": "2026-04-11T12:36:41Z"
+#     }
+#   ]
+# }
+
+# Revoke an API key (deactivate it permanently)
+DELETE /v1/keys/{keyID}
+# Response: HTTP 204 (no body)
+```
+
+**Note:** API key hashes are never returned to clients, only the prefix (first 12 characters). The plaintext key is shown only once, when created. Store it securely.
 
 ### Idempotency in practice
 
