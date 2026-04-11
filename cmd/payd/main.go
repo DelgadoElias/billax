@@ -28,6 +28,9 @@ import (
 	"github.com/DelgadoElias/billax/internal/tenant"
 )
 
+// version is set via ldflags during build: -X 'main.version=x.y.z'
+var version = "dev"
+
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
@@ -35,6 +38,9 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Set version from ldflags
+	cfg.AppVersion = version
 
 	// Initialize logger
 	logger := initLogger(cfg.LogLevel)
@@ -85,7 +91,7 @@ func main() {
 	tenantHandler := tenant.NewHandler(tenantSvc)
 
 	// Create router with public and protected routes
-	router := middleware.NewRouterWithPublicRoutes(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled,
+	router := middleware.NewRouterWithPublicRoutes(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, cfg.AppVersion,
 		// Public routes (no auth required)
 		func(r chi.Router) {
 			tenantHandler.RegisterRoutes(r)

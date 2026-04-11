@@ -13,6 +13,7 @@ type Config struct {
 	// Required
 	DatabaseURL string
 	AppEnv      string // development|production
+	AppVersion  string // version injected via ldflags during build
 
 	// Optional with defaults
 	Port                   int

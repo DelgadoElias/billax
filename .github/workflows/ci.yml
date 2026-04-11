@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: payd_app
+          POSTGRES_PASSWORD: payd_password
+          POSTGRES_DB: payd
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -race -coverprofile=coverage.out ./...
+        env:
+          DATABASE_URL: postgres://payd_app:payd_password@localhost:5432/payd?sslmode=disable
+          APP_ENV: test
+
+      - name: Build binary
+        run: go build -o payd ./cmd/payd
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64

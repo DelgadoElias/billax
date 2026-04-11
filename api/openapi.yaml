@@ -14,6 +14,146 @@ servers:
     description: Production server (example)
 
 paths:
+  /v1/signup:
+    post:
+      summary: Sign up a new tenant account (public)
+      operationId: signup
+      tags:
+        - Tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: Tenant account created with API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignupResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '409':
+          description: Conflict (duplicate tenant slug or email)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/me:
+    get:
+      summary: Get current tenant info
+      operationId: getTenantMe
+      tags:
+        - Tenant
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Current tenant info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/keys:
+    post:
+      summary: Create a new API key
+      operationId: createAPIKey
+      tags:
+        - Tenant
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKeyRequest'
+      responses:
+        '201':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaintextKeyResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: List API keys
+      operationId: listAPIKeys
+      tags:
+        - Tenant
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of API keys (plaintext never shown again)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListKeysResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/keys/{keyID}:
+    delete:
+      summary: Revoke an API key
+      operationId: revokeAPIKey
+      tags:
+        - Tenant
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: keyID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: API key revoked
+        '404':
+          description: API key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /v1/plans:
     post:
       summary: Create or get a plan (idempotent by slug)
@@ -47,6 +187,181 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: List plans
+      operationId: listPlans
+      tags:
+        - Plans
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+          description: Filter by active status
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of plans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPlansResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/plans/{planID}:
+    get:
+      summary: Get a plan by ID
+      operationId: getPlan
+      tags:
+        - Plans
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Plan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      summary: Update a plan
+      operationId: updatePlan
+      tags:
+        - Plans
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlanRequest'
+      responses:
+        '200':
+          description: Plan updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete (deactivate) a plan
+      operationId: deletePlan
+      tags:
+        - Plans
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: planID
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Plan deleted
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/plans/slug/{slug}:
+    get:
+      summary: Get a plan by slug
+      operationId: getPlanBySlug
+      tags:
+        - Plans
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized
           content:
@@ -107,6 +422,170 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+    get:
+      summary: List subscriptions
+      operationId: listSubscriptions
+      tags:
+        - Subscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [trialing, active, past_due, canceled, expired]
+          description: Filter by status (repeatable)
+        - name: tag
+          in: query
+          schema:
+            type: string
+          description: Filter by tag (repeatable, AND semantics)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of subscriptions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSubscriptionsResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/subscriptions/{key}:
+    get:
+      summary: Get subscription by key (includes last 10 payments)
+      operationId: getSubscription
+      tags:
+        - Subscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscription details with embedded payment history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    patch:
+      summary: Update subscription (tags, metadata, amount)
+      operationId: updateSubscription
+      tags:
+        - Subscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubscriptionRequest'
+      responses:
+        '200':
+          description: Subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unsupported feature for provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/subscriptions/{key}/cancel:
+    post:
+      summary: Cancel a subscription
+      operationId: cancelSubscription
+      tags:
+        - Subscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelSubscriptionRequest'
+      responses:
+        '200':
+          description: Subscription canceled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: Subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /v1/subscriptions/{key}/payments:
     post:
       summary: Create a payment for a subscription (idempotent by key)
@@ -147,6 +626,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Payment'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: List payments for a subscription
+      operationId: listSubscriptionPayments
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of payments for subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPaymentsResponse'
+        '404':
+          description: Subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/payments:
+    get:
+      summary: List all payments for tenant
+      operationId: listPayments
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            type: string
+          description: Filter by provider name
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of payments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPaymentsResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/provider-credentials/{provider}:
+    post:
+      summary: Store provider API credentials
+      operationId: setProviderCredentials
+      tags:
+        - Provider
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Provider name (e.g., mercadopago)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetProviderCredentialsRequest'
+      responses:
+        '200':
+          description: Credentials stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                  stored:
+                    type: boolean
         '400':
           description: Validation error
           content:
@@ -544,3 +1149,220 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    SignupRequest:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          description: Tenant company name
+          example: "ACME Corp"
+        email:
+          type: string
+          format: email
+          description: Tenant admin email
+          example: "admin@acme.com"
+
+    SignupResponse:
+      type: object
+      required:
+        - tenant
+        - api_key
+      properties:
+        tenant:
+          $ref: '#/components/schemas/Tenant'
+        api_key:
+          $ref: '#/components/schemas/PlaintextKeyResponse'
+        warning:
+          type: string
+          description: Warning to store the API key securely
+          example: "Store this key securely. It will not be shown again."
+
+    Tenant:
+      type: object
+      required:
+        - id
+        - name
+        - slug
+        - email
+        - is_active
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+          description: URL-safe tenant slug
+        email:
+          type: string
+          format: email
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    CreateKeyRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Description for the API key
+          example: "CI/CD GitHub Actions"
+
+    PlaintextKeyResponse:
+      type: object
+      required:
+        - id
+        - key
+        - key_prefix
+        - scopes
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Full API key (plaintext, only shown once)
+          example: "payd_live_xxxxxxxxxxxxxxxxxxxx"
+        key_prefix:
+          type: string
+          description: First 12 characters for identification
+          example: "payd_live_xxx"
+        scopes:
+          type: array
+          items:
+            type: string
+          example: ["read", "write"]
+        created_at:
+          type: string
+          format: date-time
+
+    APIKey:
+      type: object
+      required:
+        - id
+        - key_prefix
+        - scopes
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        key_prefix:
+          type: string
+          description: First 12 characters for identification
+        scopes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ListKeysResponse:
+      type: object
+      required:
+        - keys
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/APIKey'
+
+    ListPlansResponse:
+      type: object
+      required:
+        - plans
+        - next_cursor
+      properties:
+        plans:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for next page, null if last page
+
+    ListSubscriptionsResponse:
+      type: object
+      required:
+        - subscriptions
+        - next_cursor
+      properties:
+        subscriptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subscription'
+        next_cursor:
+          type: string
+          nullable: true
+
+    ListPaymentsResponse:
+      type: object
+      required:
+        - payments
+        - next_cursor
+      properties:
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
+        next_cursor:
+          type: string
+          nullable: true
+
+    UpdatePlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        is_active:
+          type: boolean
+
+    UpdateSubscriptionRequest:
+      type: object
+      properties:
+        amount:
+          type: integer
+          description: New amount in minor currency units (pay-per-use)
+        tags:
+          type: array
+          items:
+            type: string
+          description: Subscription tags (presence in request = update, absence = no change)
+        metadata:
+          type: object
+          description: Arbitrary JSON metadata
+        cancel_at_period_end:
+          type: boolean
+          description: Cancel at period end instead of immediately
+
+    CancelSubscriptionRequest:
+      type: object
+      required:
+        - at_period_end
+      properties:
+        at_period_end:
+          type: boolean
+          description: Cancel at end of period (true) or immediately (false)
+          example: true
+
+    SetProviderCredentialsRequest:
+      type: object
+      description: Provider-specific credentials (varies by provider)
+      example:
+        access_token: "APP_USR-xxxx"
+        webhook_secret: "xxxx"
