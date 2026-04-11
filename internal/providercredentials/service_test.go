@@ -77,6 +77,24 @@ func (m *mockRepository) Delete(ctx context.Context, tenantID uuid.UUID, provide
 	return errors.ErrNotFound
 }
 
+func (m *mockRepository) GetTenantByWebhookSecret(ctx context.Context, secret string) (uuid.UUID, string, map[string]string, error) {
+	// Mock implementation: search for the secret across all tenants
+	for tenantKey, providers := range m.data {
+		for providerName, config := range providers {
+			if config["webhook_secret"] == secret {
+				tenantID, _ := uuid.Parse(tenantKey)
+				// Return a copy of config
+				result := make(map[string]string)
+				for k, v := range config {
+					result[k] = v
+				}
+				return tenantID, providerName, result, nil
+			}
+		}
+	}
+	return uuid.Nil, "", nil, errors.ErrNotFound
+}
+
 // Setup test service
 func setupTestService(t *testing.T) (*CredentialsService, uuid.UUID) {
 	t.Helper()

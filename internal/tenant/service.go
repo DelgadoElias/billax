@@ -118,7 +118,37 @@ func (s *TenantService) RevokeKey(ctx context.Context, tenantID, keyID uuid.UUID
 	return s.repo.RevokeAPIKey(ctx, tenantID, keyID)
 }
 
+// SetDefaultProvider updates the tenant's default payment provider
+func (s *TenantService) SetDefaultProvider(ctx context.Context, tenantID uuid.UUID, providerName string) (Tenant, error) {
+	// Validate provider name
+	if err := validateProviderName(providerName); err != nil {
+		return Tenant{}, err
+	}
+
+	return s.repo.UpdateDefaultProvider(ctx, tenantID, providerName)
+}
+
 // --- Helper functions ---
+
+// validateProviderName checks if the provider name is valid
+func validateProviderName(providerName string) error {
+	validProviders := map[string]bool{
+		"mercadopago": true,
+		"stripe":      true,
+		"helipagos":   true,
+	}
+
+	if !validProviders[providerName] {
+		v := &validation.ValidationError{}
+		v.Add(&validation.FieldError{
+			Field:   "provider_name",
+			Message: "must be one of: mercadopago, stripe, helipagos",
+		})
+		return v.Err()
+	}
+
+	return nil
+}
 
 // generateSlugFromName auto-generates a slug from a tenant name
 // Example: "ACME Corp" → "acme-corp"

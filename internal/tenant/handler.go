@@ -123,14 +123,40 @@ func (h *Handler) RevokeKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// SetDefaultProvider handles POST /v1/config/default-provider (authenticated)
+func (h *Handler) SetDefaultProvider(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.TenantIDFromContext(r.Context())
+	if tenantID == uuid.Nil {
+		httputil.RespondError(w, r, fmt.Errorf("missing tenant context"))
+		return
+	}
+
+	var input struct {
+		ProviderName string `json:"provider_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		httputil.RespondError(w, r, err)
+		return
+	}
+
+	tenant, err := h.svc.SetDefaultProvider(r.Context(), tenantID, input.ProviderName)
+	if err != nil {
+		httputil.RespondError(w, r, err)
+		return
+	}
+
+	httputil.RespondOK(w, tenant)
+}
+
 // RegisterRoutes registers public tenant routes (signup)
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/signup", h.Signup)
 }
 
-// RegisterAuthRoutes registers authenticated tenant routes (key management)
+// RegisterAuthRoutes registers authenticated tenant routes (key management and configuration)
 func (h *Handler) RegisterAuthRoutes(r chi.Router) {
 	r.Post("/keys", h.CreateKey)
 	r.Get("/keys", h.ListKeys)
 	r.Delete("/keys/{keyID}", h.RevokeKey)
+	r.Post("/config/default-provider", h.SetDefaultProvider)
 }

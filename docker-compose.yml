@@ -33,9 +33,19 @@ services:
       LOG_LEVEL: info
       RATE_LIMIT_DEFAULT: 100
       PROVIDERS_CONFIG_PATH: providers.yml
+      # Credential encryption (optional in dev, required in production)
+      CREDENTIALS_ENCRYPTION_KEY: ""
+      # Subscription lifecycle job configuration
+      LIFECYCLE_JOB_INTERVAL: "300s"
+      PAST_DUE_GRACE_PERIOD_DAYS: "7"
     ports:
       - "8080:8080"
       - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     profiles:
       - observability
 

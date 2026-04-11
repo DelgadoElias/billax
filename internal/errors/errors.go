@@ -25,6 +25,10 @@ var (
 	ErrDuplicateTenantSlug   = errors.New("a tenant with this slug already exists")
 	ErrDuplicateEmail        = errors.New("this email is already registered")
 	ErrKeyNotFound           = errors.New("api key not found")
+	ErrProviderAuthFailure   = errors.New("provider authentication failed")
+	ErrProviderRejected      = errors.New("provider rejected the operation")
+	ErrProviderRateLimited   = errors.New("provider rate limit exceeded")
+	ErrWebhookSignatureInvalid = errors.New("webhook signature is invalid")
 )
 
 // DomainError carries HTTP-level context for the handler layer
@@ -58,7 +62,13 @@ func HTTPStatusFor(err error) int {
 		return http.StatusUnprocessableEntity
 	case errors.Is(err, ErrProviderNotFound):
 		return http.StatusBadRequest
-	case errors.Is(err, ErrProviderError):
+	case errors.Is(err, ErrProviderRejected):
+		return http.StatusUnprocessableEntity
+	case errors.Is(err, ErrProviderRateLimited):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, ErrWebhookSignatureInvalid):
+		return http.StatusUnauthorized
+	case errors.Is(err, ErrProviderError), errors.Is(err, ErrProviderAuthFailure):
 		return http.StatusBadGateway
 	case errors.Is(err, ErrNotSupported):
 		return http.StatusNotImplemented
@@ -99,6 +109,14 @@ func CodeFor(err error) string {
 		return "provider_required"
 	case errors.Is(err, ErrProviderNotFound):
 		return "provider_not_found"
+	case errors.Is(err, ErrProviderAuthFailure):
+		return "provider_auth_failure"
+	case errors.Is(err, ErrProviderRejected):
+		return "provider_rejected"
+	case errors.Is(err, ErrProviderRateLimited):
+		return "provider_rate_limited"
+	case errors.Is(err, ErrWebhookSignatureInvalid):
+		return "webhook_signature_invalid"
 	case errors.Is(err, ErrProviderError):
 		return "provider_error"
 	case errors.Is(err, ErrNotSupported):

@@ -8,13 +8,14 @@ import (
 
 // Tenant represents a customer account (tenant) in billax
 type Tenant struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	Email     string    `json:"email"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                    uuid.UUID `json:"id"`
+	Name                  string    `json:"name"`
+	Slug                  string    `json:"slug"`
+	Email                 string    `json:"email"`
+	IsActive              bool      `json:"is_active"`
+	DefaultProviderName   string    `json:"default_provider_name"` // default payment provider (mercadopago, stripe, helipagos)
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // APIKey represents an API key for a tenant

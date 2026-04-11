@@ -17,6 +17,7 @@ type TenantRepo interface {
 	Create(ctx context.Context, t Tenant) (Tenant, error)
 	GetBySlug(ctx context.Context, slug string) (Tenant, error)
 	GetByID(ctx context.Context, id uuid.UUID) (Tenant, error)
+	UpdateDefaultProvider(ctx context.Context, tenantID uuid.UUID, providerName string) (Tenant, error)
 	CreateAPIKey(ctx context.Context, tenantID uuid.UUID, keyPrefix, keyHash string, input CreateKeyInput) (APIKey, error)
 	ListAPIKeys(ctx context.Context, tenantID uuid.UUID) ([]APIKey, error)
 	GetAPIKeyByID(ctx context.Context, tenantID uuid.UUID, keyID uuid.UUID) (APIKey, error)
@@ -45,9 +46,9 @@ func (r *Repository) Create(ctx context.Context, t Tenant) (Tenant, error) {
 	err = conn.QueryRow(ctx,
 		`INSERT INTO tenants (name, slug, email, is_active)
 		 VALUES ($1, $2, $3, true)
-		 RETURNING id, name, slug, email, is_active, created_at, updated_at`,
+		 RETURNING id, name, slug, email, is_active, default_provider_name, created_at, updated_at`,
 		t.Name, t.Slug, t.Email,
-	).Scan(&created.ID, &created.Name, &created.Slug, &created.Email, &created.IsActive, &created.CreatedAt, &created.UpdatedAt)
+	).Scan(&created.ID, &created.Name, &created.Slug, &created.Email, &created.IsActive, &created.DefaultProviderName, &created.CreatedAt, &created.UpdatedAt)
 
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -90,10 +91,10 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (Tenant, error)
 
 	var t Tenant
 	err = conn.QueryRow(ctx,
-		`SELECT id, name, slug, email, is_active, created_at, updated_at
+		`SELECT id, name, slug, email, is_active, default_provider_name, created_at, updated_at
 		 FROM tenants WHERE slug = $1`,
 		slug,
-	).Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.CreatedAt, &t.UpdatedAt)
+	).Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.DefaultProviderName, &t.CreatedAt, &t.UpdatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Tenant{}, domerrors.ErrNotFound
@@ -115,16 +116,43 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Tenant, error) 
 
 	var t Tenant
 	err = conn.QueryRow(ctx,
-		`SELECT id, name, slug, email, is_active, created_at, updated_at
+		`SELECT id, name, slug, email, is_active, default_provider_name, created_at, updated_at
 		 FROM tenants WHERE id = $1`,
 		id,
-	).Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.CreatedAt, &t.UpdatedAt)
+	).Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.DefaultProviderName, &t.CreatedAt, &t.UpdatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Tenant{}, domerrors.ErrNotFound
 	}
 	if err != nil {
 		return Tenant{}, fmt.Errorf("getting tenant by id: %w", err)
+	}
+
+	return t, nil
+}
+
+// UpdateDefaultProvider updates the default provider for a tenant and returns the updated tenant
+func (r *Repository) UpdateDefaultProvider(ctx context.Context, tenantID uuid.UUID, providerName string) (Tenant, error) {
+	conn, err := r.pool.Acquire(ctx)
+	if err != nil {
+		return Tenant{}, fmt.Errorf("acquiring connection: %w", err)
+	}
+	defer conn.Release()
+
+	var t Tenant
+	err = conn.QueryRow(ctx,
+		`UPDATE tenants
+		 SET default_provider_name = $1, updated_at = NOW()
+		 WHERE id = $2
+		 RETURNING id, name, slug, email, is_active, default_provider_name, created_at, updated_at`,
+		providerName, tenantID,
+	).Scan(&t.ID, &t.Name, &t.Slug, &t.Email, &t.IsActive, &t.DefaultProviderName, &t.CreatedAt, &t.UpdatedAt)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Tenant{}, domerrors.ErrNotFound
+	}
+	if err != nil {
+		return Tenant{}, fmt.Errorf("updating default provider: %w", err)
 	}
 
 	return t, nil

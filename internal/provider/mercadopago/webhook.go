@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/provider"
 )
 
@@ -27,11 +28,17 @@ type mpWebhookPayload struct {
 func validateAndParseWebhook(payload []byte, rawSignature, secret, requestID string) (*provider.WebhookEvent, error) {
 	// Validate the signature
 	if err := validateSignature(payload, secret, requestID, rawSignature); err != nil {
-		return nil, err
+		// Wrap signature validation errors with the sentinel for webhook signature invalid
+		return nil, fmt.Errorf("mercadopago.validateAndParseWebhook: %w", errors.ErrWebhookSignatureInvalid)
 	}
 
 	// Parse the webhook event
-	return parseWebhookEvent(payload)
+	if event, err := parseWebhookEvent(payload); err != nil {
+		// Payload parsing errors are treated as invalid input
+		return nil, fmt.Errorf("mercadopago.validateAndParseWebhook: %w", errors.ErrInvalidInput)
+	} else {
+		return event, nil
+	}
 }
 
 // validateSignature validates the HMAC-SHA256 signature from Mercado Pago

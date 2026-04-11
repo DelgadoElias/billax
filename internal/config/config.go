@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,15 +17,18 @@ type Config struct {
 	AppVersion  string // version injected via ldflags during build
 
 	// Optional with defaults
-	Port                   int
-	LogLevel               string
-	RateLimitDefault       int
-	WebhookDeliveryTimeout time.Duration
-	WebhookMaxRetries      int
-	ProvidersConfigPath    string // path to providers.yml
-	MigrationsPath         string // path to migrations directory
-	MetricsEnabled         bool
-	MetricsPort            int
+	Port                      int
+	LogLevel                  string
+	RateLimitDefault          int
+	WebhookDeliveryTimeout    time.Duration
+	WebhookMaxRetries         int
+	ProvidersConfigPath       string // path to providers.yml
+	MigrationsPath            string // path to migrations directory
+	MetricsEnabled            bool
+	MetricsPort               int
+	CredentialsEncryptionKey  []byte        // 32 bytes from CREDENTIALS_ENCRYPTION_KEY hex env var
+	LifecycleJobInterval      time.Duration // interval for subscription lifecycle jobs (renewals, expiry)
+	PastDueGracePeriodDays    int           // grace period before expiring past_due subscriptions
 }
 
 // Load reads configuration from environment variables with validation
@@ -46,11 +50,30 @@ func Load() (*Config, error) {
 		MigrationsPath:      getEnv("MIGRATIONS_PATH", "migrations"),
 		MetricsEnabled:      getEnvBool("METRICS_ENABLED", true),
 		MetricsPort:         getEnvInt("METRICS_PORT", 9090),
+		LifecycleJobInterval:  getEnvDuration("LIFECYCLE_JOB_INTERVAL", 5*time.Minute),
+		PastDueGracePeriodDays: getEnvInt("PAST_DUE_GRACE_PERIOD_DAYS", 7),
+	}
+
+	// Parse encryption key from hex (optional, required in production)
+	if hexKey := os.Getenv("CREDENTIALS_ENCRYPTION_KEY"); hexKey != "" {
+		key, err := hex.DecodeString(hexKey)
+		if err != nil {
+			return nil, fmt.Errorf("CREDENTIALS_ENCRYPTION_KEY must be valid hex: %w", err)
+		}
+		if len(key) != 32 {
+			return nil, fmt.Errorf("CREDENTIALS_ENCRYPTION_KEY must be 64 hex chars (32 bytes), got %d chars", len(hexKey))
+		}
+		cfg.CredentialsEncryptionKey = key
 	}
 
 	// Validate required fields
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	// Validate production requirements
+	if cfg.AppEnv == "production" && len(cfg.CredentialsEncryptionKey) == 0 {
+		return nil, fmt.Errorf("CREDENTIALS_ENCRYPTION_KEY is required in production")
 	}
 
 	return cfg, nil

@@ -167,3 +167,26 @@ func (s *CredentialsService) DeleteProviderConfig(ctx context.Context, tenantID 
 
 	return nil
 }
+
+// LookupByWebhookSecret discovers tenant and provider by webhook secret
+// Used by public webhook endpoints to route incoming webhooks without auth context
+// Returns ErrNotFound if secret doesn't exist
+func (s *CredentialsService) LookupByWebhookSecret(ctx context.Context, secret string) (uuid.UUID, string, map[string]string, error) {
+	if secret == "" {
+		return uuid.Nil, "", nil, fmt.Errorf("lookup by webhook secret: secret cannot be empty: %w", errors.ErrInvalidInput)
+	}
+
+	tenantID, providerName, config, err := s.repo.GetTenantByWebhookSecret(ctx, secret)
+	if err != nil {
+		// Return ErrNotFound for invalid secret
+		return uuid.Nil, "", nil, fmt.Errorf("lookup by webhook secret: %w", errors.ErrNotFound)
+	}
+
+	// Audit log (do NOT log secret or config values)
+	slog.Info("webhook secret validated",
+		"tenant_id", tenantID.String(),
+		"provider", providerName,
+	)
+
+	return tenantID, providerName, config, nil
+}

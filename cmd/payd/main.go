@@ -26,6 +26,7 @@ import (
 	"github.com/DelgadoElias/billax/internal/providercredentials"
 	"github.com/DelgadoElias/billax/internal/subscription"
 	"github.com/DelgadoElias/billax/internal/tenant"
+	"github.com/DelgadoElias/billax/internal/webhook"
 )
 
 // version is set via ldflags during build: -X 'main.version=x.y.z'
@@ -80,7 +81,7 @@ func main() {
 	planRepo := plan.NewRepository(pool)
 	subRepo := subscription.NewRepository(pool)
 	paymentRepo := payment.NewRepository(pool)
-	credRepo := providercredentials.NewRepository(pool)
+	credRepo := providercredentials.NewRepository(pool, cfg.CredentialsEncryptionKey)
 	tenantRepo := tenant.NewRepository(pool)
 
 	// Initialize services
@@ -92,16 +93,18 @@ func main() {
 
 	// Initialize handlers
 	planHandler := plan.NewHandler(planSvc)
-	subHandler := subscription.NewHandler(subSvc)
+	subHandler := subscription.NewHandlerWithTenant(subSvc, tenantRepo)
 	paymentHandler := payment.NewHandler(paySvc, credSvc)
 	credHandler := providercredentials.NewHandler(credSvc)
 	tenantHandler := tenant.NewHandler(tenantSvc)
+	webhookHandler := webhook.NewHandler(paymentRepo, credSvc, adapter)
 
 	// Create router with public and protected routes
 	router := middleware.NewRouterWithPublicRoutes(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, cfg.AppVersion,
 		// Public routes (no auth required)
 		func(r chi.Router) {
 			tenantHandler.RegisterRoutes(r)
+			webhookHandler.RegisterRoutes(r)
 		},
 		// Protected routes (auth required)
 		func(r chi.Router) {
@@ -113,12 +116,16 @@ func main() {
 		},
 	)
 
-	// Create context for background tasks (poller, etc.)
+	// Create context for background tasks (poller, lifecycle jobs, etc.)
 	// This will be cancelled during graceful shutdown
 	pollerCtx, pollerCancel := context.WithCancel(context.Background())
 
 	// Start background poller for subscription metrics
 	go startSubscriptionMetricsPoller(pollerCtx, logger, subRepo)
+
+	// Start lifecycle job runner (renewals, trial expiry, past due expiry)
+	lifecycleRunner := subscription.NewLifecycleRunner(subRepo, paySvc, credSvc, logger, cfg.PastDueGracePeriodDays)
+	go lifecycleRunner.Run(pollerCtx, cfg.LifecycleJobInterval)
 
 	// Start HTTP server
 	addr := net.JoinHostPort("", fmt.Sprintf("%d", cfg.Port))

@@ -9,14 +9,25 @@ import (
 
 	"github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/httputil"
+	"github.com/DelgadoElias/billax/internal/middleware"
+	"github.com/DelgadoElias/billax/internal/tenant"
 )
 
 type Handler struct {
-	svc *SubscriptionService
+	svc        *SubscriptionService
+	tenantRepo tenant.TenantRepo
 }
 
 func NewHandler(svc *SubscriptionService) *Handler {
 	return &Handler{svc: svc}
+}
+
+// NewHandlerWithTenant creates a handler with tenant repo for applying default provider
+func NewHandlerWithTenant(svc *SubscriptionService, tenantRepo tenant.TenantRepo) *Handler {
+	return &Handler{
+		svc:        svc,
+		tenantRepo: tenantRepo,
+	}
 }
 
 // RegisterRoutes mounts subscription routes onto a chi sub-router
@@ -47,6 +58,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Set the idempotency key from header
 	input.IdempotencyKey = idempotencyKey
+
+	// Apply default provider from tenant if not specified and repo is available
+	if input.ProviderName == "" && h.tenantRepo != nil {
+		tenantID := middleware.TenantIDFromContext(r.Context())
+		if tenantID != uuid.Nil {
+			t, err := h.tenantRepo.GetByID(r.Context(), tenantID)
+			if err == nil && t.DefaultProviderName != "" {
+				input.ProviderName = t.DefaultProviderName
+			}
+		}
+	}
 
 	sub, created, err := h.svc.Create(r.Context(), input)
 	if err != nil {

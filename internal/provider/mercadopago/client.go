@@ -10,6 +10,8 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
+
+	"github.com/DelgadoElias/billax/internal/provider"
 )
 
 // Client handles HTTP communication with Mercado Pago API
@@ -109,7 +111,8 @@ func (c *Client) CreatePayment(ctx context.Context, req mpCreatePaymentRequest, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, c.readErrorResponse(resp.Body)
+		providerErr := c.readErrorResponse(resp, resp.Body)
+		return nil, providerErr
 	}
 
 	var payment mpPayment
@@ -144,7 +147,8 @@ func (c *Client) CreateRefund(ctx context.Context, paymentID string, amount floa
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, c.readErrorResponse(resp.Body)
+		providerErr := c.readErrorResponse(resp, resp.Body)
+		return nil, providerErr
 	}
 
 	var refund mpRefund
@@ -194,24 +198,58 @@ func (c *Client) doWithRetry(ctx context.Context, bodyBytes []byte, originalReq 
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests { // 429
+			providerErr := c.readErrorResponse(resp, resp.Body)
 			resp.Body.Close()
-			lastErr = fmt.Errorf("rate limited (429)")
+			lastErr = providerErr
 			continue
 		}
 
 		return resp, nil
 	}
 
+	// Convert last error to ProviderError if it is one, otherwise wrap as unknown
+	if provErr, ok := lastErr.(*provider.ProviderError); ok {
+		return nil, provErr
+	}
 	return nil, fmt.Errorf("mercadopago: max retries exceeded after %d attempts: %w", maxRetries+1, lastErr)
 }
 
-// readErrorResponse parses an error response from Mercado Pago
-func (c *Client) readErrorResponse(body io.Reader) error {
+// mapErrorCategory maps a Mercado Pago HTTP status code to a provider-agnostic error category
+// This allows Stripe, Helipagos, and other providers to use the same categories
+func (c *Client) mapErrorCategory(httpStatus int) provider.ErrorCategory {
+	switch httpStatus {
+	case http.StatusUnauthorized: // 401
+		return provider.ErrorCategoryAuthFailure
+	case http.StatusUnprocessableEntity: // 422
+		return provider.ErrorCategoryRejected
+	case http.StatusTooManyRequests: // 429
+		return provider.ErrorCategoryRateLimited
+	case http.StatusBadRequest: // 400
+		return provider.ErrorCategoryValidation
+	default:
+		return provider.ErrorCategoryUnknown
+	}
+}
+
+// readErrorResponse parses an error response from Mercado Pago and returns a classified ProviderError
+func (c *Client) readErrorResponse(resp *http.Response, body io.Reader) *provider.ProviderError {
 	var mpErr mpErrorResponse
 	if err := json.NewDecoder(body).Decode(&mpErr); err != nil {
-		return fmt.Errorf("unreadable error response: %w", err)
+		// If we can't parse the response, classify by HTTP status alone
+		return &provider.ProviderError{
+			Category:        c.mapErrorCategory(resp.StatusCode),
+			HTTPStatus:      resp.StatusCode,
+			ProviderCode:    "unknown",
+			ProviderMessage: "unreadable error response",
+		}
 	}
-	return fmt.Errorf("mercadopago: %s (%s)", mpErr.Message, mpErr.Error)
+
+	return &provider.ProviderError{
+		Category:        c.mapErrorCategory(resp.StatusCode),
+		HTTPStatus:      resp.StatusCode,
+		ProviderCode:    mpErr.Error,
+		ProviderMessage: mpErr.Message,
+	}
 }
 
 // --- Helper functions ---

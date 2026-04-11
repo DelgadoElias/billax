@@ -2,11 +2,13 @@ package mercadopago
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 
-	"github.com/DelgadoElias/billax/internal/errors"
+	apperrors "github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/provider"
 )
 
@@ -55,7 +57,7 @@ func (p *Provider) ValidateConfig(config map[string]string) error {
 	for _, key := range required {
 		val := config[key]
 		if val == "" {
-			return fmt.Errorf("mercadopago: missing required config key %q: %w", key, errors.ErrInvalidInput)
+			return fmt.Errorf("mercadopago: missing required config key %q: %w", key, apperrors.ErrInvalidInput)
 		}
 	}
 	return nil
@@ -66,7 +68,7 @@ func (p *Provider) CreateCharge(ctx context.Context, req provider.ChargeRequest)
 	// Extract access token from config
 	accessToken := req.Config["access_token"]
 	if accessToken == "" {
-		return nil, fmt.Errorf("mercadopago.CreateCharge: access_token is required: %w", errors.ErrInvalidInput)
+		return nil, fmt.Errorf("mercadopago.CreateCharge: access_token is required: %w", apperrors.ErrInvalidInput)
 	}
 
 	// Build the Mercado Pago request
@@ -75,8 +77,30 @@ func (p *Provider) CreateCharge(ctx context.Context, req provider.ChargeRequest)
 	// Call Mercado Pago API
 	mpPayment, err := p.client.CreatePayment(ctx, mpReq, accessToken, req.IdempotencyKey)
 	if err != nil {
-		slog.Error("mercadopago: CreatePayment failed", "error", err, "tenant_id", "context")
-		return nil, fmt.Errorf("mercadopago.CreateCharge: %w", errors.ErrProviderError)
+		// Classify ProviderError by category and map to billax sentinels
+		var provErr *provider.ProviderError
+		if errors.As(err, &provErr) {
+			slog.Error("mercadopago: CreatePayment failed", "error", err, "category", provErr.Category)
+			switch provErr.Category {
+			case provider.ErrorCategoryAuthFailure:
+				return nil, fmt.Errorf("mercadopago.CreateCharge: %w", apperrors.ErrProviderAuthFailure)
+			case provider.ErrorCategoryRejected:
+				return nil, &apperrors.DomainError{
+					Code:       "provider_rejected",
+					Message:    provErr.ProviderMessage,
+					HTTPStatus: http.StatusUnprocessableEntity,
+					Cause:      apperrors.ErrProviderRejected,
+				}
+			case provider.ErrorCategoryRateLimited:
+				return nil, fmt.Errorf("mercadopago.CreateCharge: %w", apperrors.ErrProviderRateLimited)
+			case provider.ErrorCategoryValidation:
+				return nil, fmt.Errorf("mercadopago.CreateCharge: %w", apperrors.ErrInvalidInput)
+			default:
+				return nil, fmt.Errorf("mercadopago.CreateCharge: %w", apperrors.ErrProviderError)
+			}
+		}
+		slog.Error("mercadopago: CreatePayment failed", "error", err)
+		return nil, fmt.Errorf("mercadopago.CreateCharge: %w", apperrors.ErrProviderError)
 	}
 
 	// Map the response to payd's domain type
@@ -107,7 +131,7 @@ func (p *Provider) RefundCharge(ctx context.Context, chargeID string, amount int
 	return nil, fmt.Errorf(
 		"mercadopago.RefundCharge: not implemented — "+
 			"the PaymentProvider interface does not propagate per-call credentials to this method: %w",
-		errors.ErrNotSupported,
+		apperrors.ErrNotSupported,
 	)
 }
 
@@ -128,7 +152,7 @@ func (p *Provider) HandleWebhook(ctx context.Context, payload []byte, signature 
 	if len(parts) != 3 {
 		return nil, fmt.Errorf(
 			"mercadopago.HandleWebhook: signature parameter must be 'secret|requestID|rawSignature': %w",
-			errors.ErrInvalidInput,
+			apperrors.ErrInvalidInput,
 		)
 	}
 
@@ -139,7 +163,12 @@ func (p *Provider) HandleWebhook(ctx context.Context, payload []byte, signature 
 	// Validate signature and parse the webhook event
 	event, err := validateAndParseWebhook(payload, rawSignature, secret, requestID)
 	if err != nil {
-		return nil, fmt.Errorf("mercadopago.HandleWebhook: %w", errors.ErrInvalidInput)
+		// Distinguish between signature validation failure and payload parsing failure
+		if errors.Is(err, apperrors.ErrWebhookSignatureInvalid) {
+			return nil, fmt.Errorf("mercadopago.HandleWebhook: %w", apperrors.ErrWebhookSignatureInvalid)
+		}
+		// Payload parsing or other errors → ErrInvalidInput
+		return nil, fmt.Errorf("mercadopago.HandleWebhook: %w", apperrors.ErrInvalidInput)
 	}
 
 	return event, nil

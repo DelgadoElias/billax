@@ -30,6 +30,13 @@ type SubscriptionRepo interface {
 	List(ctx context.Context, tenantID uuid.UUID, input ListSubscriptionsInput) (ListSubscriptionsResult, error)
 	Cancel(ctx context.Context, id uuid.UUID, atPeriodEnd bool) (Subscription, error)
 	CountByStatus(ctx context.Context) (map[Status]int64, error)
+
+	// Lifecycle methods for background jobs (cross-tenant queries via SECURITY DEFINER functions)
+	ListDueForRenewal(ctx context.Context, now time.Time) ([]Subscription, error)
+	ListExpiredTrials(ctx context.Context, now time.Time) ([]Subscription, error)
+	ListPastDuePendingExpiry(ctx context.Context, gracePeriodEnd time.Time) ([]Subscription, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, newStatus Status) error
+	AdvancePeriod(ctx context.Context, id uuid.UUID, newStart, newEnd time.Time) error
 }
 
 type postgresRepository struct {
@@ -440,4 +447,156 @@ func (r *postgresRepository) CountByStatus(ctx context.Context) (map[Status]int6
 	}
 
 	return counts, nil
+}
+
+// ListDueForRenewal finds all active subscriptions whose current period has ended
+// Used by lifecycle job to trigger renewal charges
+// Calls SECURITY DEFINER function to bypass RLS (cross-tenant query)
+func (r *postgresRepository) ListDueForRenewal(ctx context.Context, now time.Time) ([]Subscription, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, tenant_id, subscription_key, external_customer_id, status,
+		        provider_name, provider_subscription_id, current_period_end, trial_ends_at,
+		        amount, currency, interval, interval_count
+		 FROM list_subscriptions_due_for_renewal($1)`,
+		now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list subscriptions due for renewal: %w", err)
+	}
+	defer rows.Close()
+
+	var subs []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(
+			&sub.ID, &sub.TenantID, &sub.SubscriptionKey, &sub.ExternalCustomerID, &sub.Status,
+			&sub.ProviderName, &sub.ProviderSubscriptionID, &sub.CurrentPeriodEnd, &sub.TrialEndsAt,
+			&sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan subscription for renewal: %w", err)
+		}
+		subs = append(subs, sub)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return subs, nil
+}
+
+// ListExpiredTrials finds all subscriptions with expired trial periods
+// Used by lifecycle job to transition trialing → active
+// Calls SECURITY DEFINER function to bypass RLS (cross-tenant query)
+func (r *postgresRepository) ListExpiredTrials(ctx context.Context, now time.Time) ([]Subscription, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, tenant_id, subscription_key, external_customer_id, status,
+		        provider_name, provider_subscription_id, current_period_start, current_period_end, trial_ends_at,
+		        amount, currency, interval, interval_count
+		 FROM list_subscriptions_expired_trials($1)`,
+		now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list subscriptions expired trials: %w", err)
+	}
+	defer rows.Close()
+
+	var subs []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(
+			&sub.ID, &sub.TenantID, &sub.SubscriptionKey, &sub.ExternalCustomerID, &sub.Status,
+			&sub.ProviderName, &sub.ProviderSubscriptionID, &sub.CurrentPeriodStart, &sub.CurrentPeriodEnd, &sub.TrialEndsAt,
+			&sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan subscription expired trial: %w", err)
+		}
+		subs = append(subs, sub)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return subs, nil
+}
+
+// ListPastDuePendingExpiry finds all subscriptions in past_due status whose grace period has expired
+// Used by lifecycle job to expire subscriptions
+// Calls SECURITY DEFINER function to bypass RLS (cross-tenant query)
+func (r *postgresRepository) ListPastDuePendingExpiry(ctx context.Context, gracePeriodEnd time.Time) ([]Subscription, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, tenant_id, subscription_key, external_customer_id, status,
+		        provider_name, provider_subscription_id, current_period_end,
+		        amount, currency, interval, interval_count
+		 FROM list_subscriptions_past_due_pending_expiry($1)`,
+		gracePeriodEnd,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list subscriptions past due pending expiry: %w", err)
+	}
+	defer rows.Close()
+
+	var subs []Subscription
+	for rows.Next() {
+		var sub Subscription
+		if err := rows.Scan(
+			&sub.ID, &sub.TenantID, &sub.SubscriptionKey, &sub.ExternalCustomerID, &sub.Status,
+			&sub.ProviderName, &sub.ProviderSubscriptionID, &sub.CurrentPeriodEnd,
+			&sub.Amount, &sub.Currency, &sub.Interval, &sub.IntervalCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan subscription past due: %w", err)
+		}
+		subs = append(subs, sub)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return subs, nil
+}
+
+// UpdateStatus updates just the subscription status
+// Used by lifecycle job to transition subscription states (trialing→active, etc)
+// Note: This is a minimal operation, only updates status and updated_at
+func (r *postgresRepository) UpdateStatus(ctx context.Context, id uuid.UUID, newStatus Status) error {
+	query := `
+		UPDATE subscriptions
+		SET status = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+
+	result, err := r.pool.Exec(ctx, query, newStatus, id)
+	if err != nil {
+		return fmt.Errorf("update subscription status: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
+}
+
+// AdvancePeriod advances the billing period for a subscription after successful renewal
+// Updates both current_period_start and current_period_end
+// Used by lifecycle job after successfully charging for renewal
+func (r *postgresRepository) AdvancePeriod(ctx context.Context, id uuid.UUID, newStart, newEnd time.Time) error {
+	query := `
+		UPDATE subscriptions
+		SET current_period_start = $1, current_period_end = $2, updated_at = NOW()
+		WHERE id = $3
+	`
+
+	result, err := r.pool.Exec(ctx, query, newStart, newEnd, id)
+	if err != nil {
+		return fmt.Errorf("advance subscription period: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return apperrors.ErrNotFound
+	}
+
+	return nil
 }
