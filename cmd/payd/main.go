@@ -137,7 +137,7 @@ func main() {
 	// Wrap backoffice service to match tenant handler interface
 	// This avoids import cycles between tenant and backoffice packages
 	backofficeAdapter := &backofficeServiceWrapper{svc: backofficeSvc}
-	tenantHandler := tenant.NewHandlerWithBackoffice(tenantSvc, backofficeAdapter)
+	tenantHandler := tenant.NewHandlerWithBackoffice(tenantSvc, backofficeAdapter, cfg)
 
 	// Create router with public, protected, and backoffice routes
 	router := middleware.NewRouterWithPublicRoutesAndBackoffice(logger, pool, cfg.RateLimitDefault, cfg.MetricsEnabled, cfg.AppVersion,
@@ -146,13 +146,6 @@ func main() {
 			tenantHandler.RegisterRoutes(r)
 			webhookHandler.RegisterRoutes(r)
 			backofficeHandler.RegisterPublicRoutes(r)
-
-			// Serve the backoffice UI (SPA with fallback to index.html)
-			uiHandler := serveUI()
-			r.Get("/backoffice", func(w http.ResponseWriter, r *http.Request) {
-				http.Redirect(w, r, "/backoffice/", http.StatusMovedPermanently)
-			})
-			r.Get("/backoffice/*", uiHandler.ServeHTTP)
 		},
 		// Protected routes with API key auth
 		func(r chi.Router) {
@@ -168,6 +161,14 @@ func main() {
 		},
 		cfg.BackofficeJWTSecret,
 	)
+
+	// Register backoffice UI handler directly on the root router (outside /v1)
+	uiHandler := serveUI()
+	router.Get("/backoffice", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/backoffice/", http.StatusMovedPermanently)
+	})
+	router.Get("/backoffice/", uiHandler.ServeHTTP)
+	router.Get("/backoffice/*", uiHandler.ServeHTTP)
 
 	// Create context for background tasks (poller, lifecycle jobs, etc.)
 	// This will be cancelled during graceful shutdown

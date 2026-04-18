@@ -8,6 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/DelgadoElias/billax/internal/config"
+	appErrors "github.com/DelgadoElias/billax/internal/errors"
 	"github.com/DelgadoElias/billax/internal/httputil"
 	"github.com/DelgadoElias/billax/internal/middleware"
 )
@@ -22,27 +24,57 @@ type BackofficeService interface {
 type Handler struct {
 	svc               *TenantService
 	backofficeService BackofficeService
+	cfg               *config.Config
 }
 
 // NewHandler creates a new tenant handler
 func NewHandler(svc *TenantService) *Handler {
-	return &Handler{svc: svc}
+	return &Handler{svc: svc, cfg: &config.Config{}}
 }
 
 // NewHandlerWithBackoffice creates a tenant handler with backoffice admin creation support
-func NewHandlerWithBackoffice(svc *TenantService, backofficeService BackofficeService) *Handler {
+func NewHandlerWithBackoffice(svc *TenantService, backofficeService BackofficeService, cfg *config.Config) *Handler {
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
 	return &Handler{
 		svc:               svc,
 		backofficeService: backofficeService,
+		cfg:               cfg,
 	}
 }
 
 // Signup handles POST /v1/signup (public, no auth required)
 func (h *Handler) Signup(w http.ResponseWriter, r *http.Request) {
+	// Check if signups are allowed
+	if !h.cfg.AllowSignup {
+		httputil.RespondError(w, r, appErrors.ErrSignupDisabled)
+		return
+	}
+
 	var input SignupInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		httputil.RespondError(w, r, err)
 		return
+	}
+
+	// Validate required fields
+	if input.Name == "" || input.Email == "" {
+		httputil.RespondError(w, r, fmt.Errorf("name and email are required"))
+		return
+	}
+
+	// If password is required, validate it
+	if h.cfg.SignupRequiresPassword {
+		if input.Password == "" {
+			httputil.RespondError(w, r, fmt.Errorf("password is required for signup"))
+			return
+		}
+		// Password should be at least 8 characters
+		if len(input.Password) < 8 {
+			httputil.RespondError(w, r, fmt.Errorf("password must be at least 8 characters"))
+			return
+		}
 	}
 
 	if h.svc == nil {
@@ -56,7 +88,7 @@ func (h *Handler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create the admin backoffice user if backoffice service is available
+	// Create the admin backoffice user if password is provided and backoffice service is available
 	if h.backofficeService != nil && input.Password != "" {
 		_, err := h.backofficeService.CreateUser(r.Context(), interface{}(tenant.ID), input.Email, input.Name, input.Password, "admin")
 		if err != nil {

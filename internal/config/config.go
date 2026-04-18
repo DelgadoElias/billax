@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -24,6 +25,7 @@ type Config struct {
 	WebhookMaxRetries         int
 	ProvidersConfigPath       string // path to providers.yml
 	MigrationsPath            string // path to migrations directory
+	BillaxConfigPath          string // path to billax_config.yml
 	MetricsEnabled            bool
 	MetricsPort               int
 	CredentialsEncryptionKey  []byte        // 32 bytes from CREDENTIALS_ENCRYPTION_KEY hex env var
@@ -37,6 +39,18 @@ type Config struct {
 	BootstrapTenantEmail   string // BOOTSTRAP_TENANT_EMAIL
 	BootstrapAdminPassword string // BOOTSTRAP_ADMIN_PASSWORD
 	BootstrapTenantSlug    string // BOOTSTRAP_TENANT_SLUG (optional)
+
+	// Billax config from billax_config.yml
+	AllowSignup             bool // allow self-service signup via POST /v1/signup
+	SignupRequiresPassword  bool // require password field in signup (creates backoffice user)
+}
+
+// BillaxConfigFile represents the billax_config.yml structure
+type BillaxConfigFile struct {
+	Auth struct {
+		AllowSignup            bool `yaml:"allow_signup"`
+		SignupRequiresPassword bool `yaml:"signup_requires_password"`
+	} `yaml:"auth"`
 }
 
 // Load reads configuration from environment variables with validation
@@ -56,6 +70,7 @@ func Load() (*Config, error) {
 		WebhookMaxRetries:   getEnvInt("WEBHOOK_MAX_RETRIES", 5),
 		ProvidersConfigPath: getEnv("PROVIDERS_CONFIG_PATH", "providers.yml"),
 		MigrationsPath:      getEnv("MIGRATIONS_PATH", "migrations"),
+		BillaxConfigPath:    getEnv("BILLAX_CONFIG_PATH", "billax_config.yml"),
 		MetricsEnabled:      getEnvBool("METRICS_ENABLED", true),
 		MetricsPort:         getEnvInt("METRICS_PORT", 9090),
 		LifecycleJobInterval:  getEnvDuration("LIFECYCLE_JOB_INTERVAL", 5*time.Minute),
@@ -66,6 +81,24 @@ func Load() (*Config, error) {
 		BootstrapTenantEmail:   os.Getenv("BOOTSTRAP_TENANT_EMAIL"),
 		BootstrapAdminPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 		BootstrapTenantSlug:    os.Getenv("BOOTSTRAP_TENANT_SLUG"),
+		AllowSignup:            true,             // safe default: allow signups
+		SignupRequiresPassword: true,             // safe default: require password
+	}
+
+	// Load billax_config.yml if it exists
+	if _, err := os.Stat(cfg.BillaxConfigPath); err == nil {
+		data, err := os.ReadFile(cfg.BillaxConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", cfg.BillaxConfigPath, err)
+		}
+
+		var billaxCfg BillaxConfigFile
+		if err := yaml.Unmarshal(data, &billaxCfg); err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", cfg.BillaxConfigPath, err)
+		}
+
+		cfg.AllowSignup = billaxCfg.Auth.AllowSignup
+		cfg.SignupRequiresPassword = billaxCfg.Auth.SignupRequiresPassword
 	}
 
 	// Parse encryption key from hex (optional, required in production)
