@@ -1,0 +1,24 @@
+# billax_config.yml — Multi-tenant configuration
+#
+# This file controls deployment-level settings for billax.
+# Each instance owner can customize how billax behaves for their deployment.
+#
+# Safe defaults are used if this file is missing or incomplete.
+
+# Authentication & Access Control
+auth:
+  # allow_signup: Enable self-service tenant signup via POST /v1/signup
+  # When disabled, new tenants can only be created via bootstrap (BOOTSTRAP_* env vars)
+  # or direct database insertion
+  allow_signup: true
+
+  # signup_requires_password: Require password field in signup request
+  # When true: POST /v1/signup creates an admin backoffice user automatically
+  # When false: password field is ignored, users must be created separately
+  signup_requires_password: true
+
+# Future configuration sections can be added here:
+# - rate_limiting: per-tenant rate limit overrides
+# - features: feature flags per tenant or globally
+# - webhooks: webhook retry policies, timeouts
+# - audit: logging levels, retention policies
