@@ -68,6 +68,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /v1/config/default-provider:
+    post:
+      summary: Set default payment provider for tenant
+      operationId: setDefaultProvider
+      tags:
+        - Tenant
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetDefaultProviderRequest'
+      responses:
+        '200':
+          description: Default provider set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /v1/keys:
     post:
       summary: Create a new API key
@@ -719,6 +753,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /v1/provider-credentials:
+    get:
+      summary: List all configured payment providers for tenant
+      operationId: listProviders
+      tags:
+        - Provider
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of configured providers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListProvidersResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /v1/provider-credentials/{provider}:
     post:
       summary: Store provider API credentials
@@ -741,23 +797,76 @@ paths:
             schema:
               $ref: '#/components/schemas/SetProviderCredentialsRequest'
       responses:
-        '200':
+        '201':
           description: Credentials stored
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  provider:
-                    type: string
-                  stored:
-                    type: boolean
+                $ref: '#/components/schemas/SetProviderCredentialsResponse'
         '400':
           description: Validation error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      summary: Check if a provider is configured
+      operationId: getProviderStatus
+      tags:
+        - Provider
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Provider name (e.g., mercadopago)
+      responses:
+        '200':
+          description: Provider configuration status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderStatusResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete provider credentials
+      operationId: deleteProviderCredentials
+      tags:
+        - Provider
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Provider name (e.g., mercadopago)
+      responses:
+        '204':
+          description: Provider credentials deleted
+        '404':
+          description: Provider credentials not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized
           content:
@@ -1366,3 +1475,55 @@ components:
       example:
         access_token: "APP_USR-xxxx"
         webhook_secret: "xxxx"
+
+    SetProviderCredentialsResponse:
+      type: object
+      required:
+        - provider
+        - message
+      properties:
+        provider:
+          type: string
+          description: Provider name
+          example: mercadopago
+        message:
+          type: string
+          description: Confirmation message
+          example: credentials configured
+
+    ProviderStatusResponse:
+      type: object
+      required:
+        - provider
+        - configured
+      properties:
+        provider:
+          type: string
+          description: Provider name
+          example: mercadopago
+        configured:
+          type: boolean
+          description: Whether this provider has credentials configured
+          example: true
+
+    ListProvidersResponse:
+      type: object
+      required:
+        - providers
+      properties:
+        providers:
+          type: array
+          description: List of configured provider names
+          items:
+            type: string
+          example: [mercadopago, stripe]
+
+    SetDefaultProviderRequest:
+      type: object
+      required:
+        - provider_name
+      properties:
+        provider_name:
+          type: string
+          description: Provider name to set as default
+          example: mercadopago
