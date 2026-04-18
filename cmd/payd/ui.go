@@ -31,25 +31,45 @@ func serveUI() http.Handler {
 	// If dist folder not found, return 404 handler
 	if distPath == "" {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, "UI not available", http.StatusNotFound)
+			http.Error(w, "UI not available (checked: ./ui/dist, ../ui/dist, /app/ui/dist)", http.StatusNotFound)
 		})
 	}
+
 
 	fileServer := http.FileServer(http.Dir(distPath))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Remove /backoffice prefix from path (since handler is registered at /backoffice/*)
+		filePath := r.URL.Path
+		if strings.HasPrefix(filePath, "/backoffice") {
+			filePath = strings.TrimPrefix(filePath, "/backoffice")
+		}
+		if filePath == "" {
+			filePath = "/"
+		}
+
 		// Clean the path
-		filePath := filepath.Clean(r.URL.Path)
+		filePath = filepath.Clean(filePath)
+		// Remove leading slash so filepath.Join works correctly
+		filePath = strings.TrimPrefix(filePath, "/")
 		fullPath := filepath.Join(distPath, filePath)
 
-		// Prevent directory traversal
-		if !strings.HasPrefix(fullPath, distPath) {
+
+		// Prevent directory traversal (normalize both paths for comparison)
+		absDistPath, _ := filepath.Abs(distPath)
+		absFullPath, _ := filepath.Abs(fullPath)
+		if !strings.HasPrefix(absFullPath, absDistPath) {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
 
 		// Check if the file exists
-		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+		info, err := os.Stat(fullPath)
+
+		if err == nil && !info.IsDir() {
+			// Change r.URL.Path so fileServer knows what to serve
+			// e.g., /backoffice/assets/file.js → /assets/file.js
+			r.URL.Path = "/" + filePath
 			fileServer.ServeHTTP(w, r)
 			return
 		}
