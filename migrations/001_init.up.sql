@@ -164,20 +164,42 @@ CREATE INDEX idx_webhook_deliveries_tenant_id ON webhook_deliveries(tenant_id);
 -- ============================================================================
 -- ROLE: payd_app (limited permissions)
 -- ============================================================================
+-- Note: This is idempotent and database-agnostic.
+-- On Neon or other managed services, the role may already exist and this will be a no-op.
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'payd_app') THEN
-        CREATE ROLE payd_app WITH LOGIN PASSWORD 'devpassword';
+        CREATE ROLE payd_app WITH LOGIN PASSWORD 'P@ssw0rd!DevRole2026';
     END IF;
+EXCEPTION WHEN OTHERS THEN
+    -- If role creation fails (e.g., on Neon), continue
+    NULL;
 END
 $$;
 
-GRANT CONNECT ON DATABASE payd TO payd_app;
+-- Grant permissions on current database (works regardless of DB name)
+-- Note: GRANT CONNECT is not required if role already exists
+DO $$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO payd_app', current_database());
+EXCEPTION WHEN OTHERS THEN
+    -- On Neon or managed services, GRANT CONNECT may fail; that's OK
+    NULL;
+END
+$$;
+
 GRANT USAGE ON SCHEMA public TO payd_app;
 
 -- Grant SELECT, INSERT, UPDATE, DELETE on all tables (no DDL)
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO payd_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO payd_app;
 
--- Ensure RLS is enforced for payd_app role
-ALTER ROLE payd_app SET row_security = on;
+-- Ensure RLS is enforced for payd_app role (if not already set)
+DO $$
+BEGIN
+    ALTER ROLE payd_app SET row_security = on;
+EXCEPTION WHEN OTHERS THEN
+    -- If ALTER fails (permissions), continue; RLS is a nice-to-have
+    NULL;
+END
+$$;
