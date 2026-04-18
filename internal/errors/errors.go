@@ -25,6 +25,7 @@ var (
 	ErrDuplicateTenantSlug   = errors.New("a tenant with this slug already exists")
 	ErrDuplicateEmail        = errors.New("this email is already registered")
 	ErrKeyNotFound           = errors.New("api key not found")
+	ErrSignupDisabled        = errors.New("new tenant signups are not allowed")
 	ErrProviderAuthFailure   = errors.New("provider authentication failed")
 	ErrProviderRejected      = errors.New("provider rejected the operation")
 	ErrProviderRateLimited   = errors.New("provider rate limit exceeded")
@@ -56,6 +57,8 @@ func HTTPStatusFor(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrMissingIdempotencyKey):
 		return http.StatusBadRequest
+	case errors.Is(err, ErrSignupDisabled):
+		return http.StatusForbidden
 	case errors.Is(err, ErrPlanNotActive), errors.Is(err, ErrSubscriptionExpired):
 		return http.StatusUnprocessableEntity
 	case errors.Is(err, ErrPayPerUseNotSupported), errors.Is(err, ErrPlansNotSupported), errors.Is(err, ErrProviderRequired):
